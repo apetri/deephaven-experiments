@@ -20,6 +20,9 @@ def bars(t:Table,bys:typing.List[str],metric:str) -> go.Figure:
         case 2:
             for n in df[bys[1]].unique():
                 fig.add_trace(go.Bar(x=df[df[bys[1]]==n][bys].T,y=df[df[bys[1]]==n][metric],name=str(n)))
+        case 3:
+            for n in df[bys[2]].unique():
+                fig.add_trace(go.Bar(x=df[df[bys[2]]==n][bys].T,y=df[df[bys[2]]==n][metric],name=str(n)))
         case _:
             raise ValueError()
 

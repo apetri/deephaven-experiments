@@ -18,6 +18,8 @@ CONFIG = {
     "chart_types" : ["bars"],
     "filterable" : lambda t: [c for c in t.column_names if not c.startswith("value")],
     "aggregations":{
+        "count": agg.count_("count"),
+        "sum1": agg.sum_("sum1 = value1"),
         "average1": agg.avg("average1 = value1"),
         "average2": agg.avg("average2 = value2"),
         "average3": agg.avg("average3 = value3")
@@ -72,8 +74,9 @@ def aggregationControls(filterable:typing.List[str],by_values:typing.List,set_by
 
     # Set buttons
     by_buttons = [
-        ui.picker(*filterable,selected_key=by_values[0],on_change=lambda v:set_by_values([v,by_values[1]]),label="Primary by"),
-        ui.picker(*["NONE"]+filterable,selected_key=by_values[1],on_change=lambda v:set_by_values([by_values[0],v]),label="Secondary by")
+        ui.picker(*filterable,selected_key=by_values[0],on_change=lambda v:set_by_values([v,by_values[1],by_values[2]]),label="Primary by"),
+        ui.picker(*["NONE"]+filterable,selected_key=by_values[1],on_change=lambda v:set_by_values([by_values[0],v,by_values[2]]),label="Secondary by"),
+        ui.picker(*["NONE"]+filterable,selected_key=by_values[2],on_change=lambda v:set_by_values([by_values[0],by_values[1],v]),label="Tertiary by")
     ]
 
     metric_button = ui.picker(*metrics,selected_key=metric_value,on_change=set_metric_value,label="Aggregation metric")
@@ -95,10 +98,10 @@ def aggregateTable(tfilt:Table,by_values:typing.List,metric_value:str) -> typing
     }
 
 # Charting
-def chartControls() -> typing.Dict:
+def chartControls(chart_type:str,set_chart_type:typing.Callable) -> typing.Dict:
 
     # Graph type button
-    chart_button = ui.picker(*CONFIG["chart_types"],selected_key=CONFIG["chart_types"][0],label="Chart type")
+    chart_button = ui.picker(*CONFIG["chart_types"],selected_key=chart_type,on_change=set_chart_type,label="Chart type")
 
     return {
         "chart_button": chart_button
@@ -126,7 +129,7 @@ def arrange(t:Table):
 
     # State management
     filter_values,set_filter_values = ui.use_state({})
-    by_values,set_by_values = ui.use_state([filterable[0],"NONE"])
+    by_values,set_by_values = ui.use_state([filterable[0],"NONE","NONE"])
     metric_value,set_metric_value = ui.use_state(metrics[0])
     chart_type,set_chart_type = ui.use_state(CONFIG["chart_types"][0])
 
@@ -141,7 +144,7 @@ def arrange(t:Table):
     aggs.update(aggregateTable(filt["filtered_table"],by_values,metric_value))
 
     # Charting
-    chrt = chartControls()
+    chrt = chartControls(chart_type,set_chart_type)
     chrt["chart"] = chartTable(aggs["aggregated_table"],by_values,metric_value,chart_type)
 
     # Arrange
