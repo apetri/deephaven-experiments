@@ -13,7 +13,9 @@ def randomTable(nrows:int) -> Table:
             "n2 = new int[]{10,20,30}[randomInt(0,3)]",
             "value1 = random()",
             "value2 = 10*random()",
-            "value3 = random() + 10*n1"
+            "value3 = random() + 10*n1",
+            "valuePred = 4*n1",
+            "valueObs = -2.5 + random()*5 + 4*n1"
         ]
     )
 

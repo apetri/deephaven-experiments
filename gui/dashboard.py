@@ -22,10 +22,20 @@ CONFIG = {
         "sum1": agg.sum_("sum1 = value1"),
         "average1": agg.avg("average1 = value1"),
         "average2": agg.avg("average2 = value2"),
-        "average3": agg.avg("average3 = value3")
+        "average3": agg.avg("average3 = value3"),
+        "valueObs": agg.avg("valueObs"),
+        "valuePred": agg.avg("valuePred")
+    },
+    "allowed_aggregations":{
+        "bars" : ["count","sum1","average1","average2","average3","valueObs","valuePred"]
     }
 
 }
+
+def AMENDLIST(l0:typing.List,n:int,v):
+    l1 = l0.copy()
+    l1[n] = v
+    return l1
 
 # Filtering
 def filteringControls(t:Table,filterable:typing.List[str],filter_values:typing.Dict,set_filter_values:typing.Callable) -> typing.Dict:
@@ -70,28 +80,32 @@ def filterTable(t:Table,filter_values:typing.Dict) -> typing.Dict:
     }
 
 # Aggregations
-def aggregationControls(filterable:typing.List[str],by_values:typing.List,set_by_values:typing.Callable,metrics:typing.List[str],metric_value:str,set_metric_value:typing.Callable) -> typing.Dict:
+def aggregationControls(filterable:typing.List[str],by_values:typing.List,set_by_values:typing.Callable,metrics:typing.List[str],metric_values:typing.List[str],set_metric_values:typing.Callable) -> typing.Dict:
 
-    # Set buttons
+    # By buttons
     by_buttons = [
-        ui.picker(*filterable,selected_key=by_values[0],on_change=lambda v:set_by_values([v,by_values[1],by_values[2]]),label="Primary by"),
-        ui.picker(*["NONE"]+filterable,selected_key=by_values[1],on_change=lambda v:set_by_values([by_values[0],v,by_values[2]]),label="Secondary by"),
-        ui.picker(*["NONE"]+filterable,selected_key=by_values[2],on_change=lambda v:set_by_values([by_values[0],by_values[1],v]),label="Tertiary by")
+        ui.picker(*filterable,selected_key=by_values[0],on_change=lambda v:set_by_values(AMENDLIST(by_values,0,v)),label="Primary by"),
+        ui.picker(*["NONE"]+filterable,selected_key=by_values[1],on_change=lambda v:set_by_values(AMENDLIST(by_values,1,v)),label="Secondary by"),
+        ui.picker(*["NONE"]+filterable,selected_key=by_values[2],on_change=lambda v:set_by_values(AMENDLIST(by_values,2,v)),label="Tertiary by")
     ]
 
-    metric_button = ui.picker(*metrics,selected_key=metric_value,on_change=set_metric_value,label="Aggregation metric")
+    # Aggregation metric buttons
+    metric_buttons = [
+        ui.picker(*metrics,selected_key=m,on_change=lambda v,n=n:set_metric_values(AMENDLIST(metric_values,n,v)),label=f"Aggregation metric {n}")
+        for (n,m) in enumerate(metric_values)
+    ]
 
     # Done
     return {
         "by_buttons" : by_buttons,
-        "metric_button" : metric_button,
+        "metric_button" : metric_buttons,
     }
 
-def aggregateTable(tfilt:Table,by_values:typing.List,metric_value:str) -> typing.Dict:
+def aggregateTable(tfilt:Table,by_values:typing.List,metric_values:typing.List[str]) -> typing.Dict:
 
     # Run aggregations
     byv = [b for b in by_values if b!="NONE"]
-    tagg = ui.use_memo(lambda:tfilt.agg_by([CONFIG["aggregations"][metric_value]],by=byv).sort(byv),[tfilt,by_values,metric_value])
+    tagg = ui.use_memo(lambda:tfilt.agg_by([CONFIG["aggregations"][m] for m in metric_values],by=byv).sort(byv),[tfilt,by_values,metric_values])
 
     return {
         "aggregated_table": tagg
@@ -107,13 +121,13 @@ def chartControls(chart_type:str,set_chart_type:typing.Callable) -> typing.Dict:
         "chart_button": chart_button
     }
 
-def chartTable(tagg:Table,bys:typing.List[str],metric:str,chart_type:str):
+def chartTable(tagg:Table,bys:typing.List[str],metrics:typing.List[str],chart_type:str):
 
     byv = [b for b in bys if b!="NONE"]
 
     match chart_type:
         case "bars":
-            return ui.use_memo(lambda:traces.bars(tagg,byv,metric),[tagg,byv,metric])
+            return ui.use_memo(lambda:traces.bars(tagg,byv,metrics[0]),[tagg,byv,metrics])
         case _:
             raise ValueError(f"Chart type:{chart_type} not implemented")
 
@@ -125,13 +139,14 @@ def chartTable(tagg:Table,bys:typing.List[str],metric:str,chart_type:str):
 def arrange(t:Table):
 
     filterable = CONFIG["filterable"](t)
-    metrics = list(CONFIG["aggregations"].keys())
 
     # State management
     filter_values,set_filter_values = ui.use_state({})
     by_values,set_by_values = ui.use_state([filterable[0],"NONE","NONE"])
-    metric_value,set_metric_value = ui.use_state(metrics[0])
     chart_type,set_chart_type = ui.use_state(CONFIG["chart_types"][0])
+
+    metrics = ui.use_memo(lambda:CONFIG["allowed_aggregations"][chart_type],[chart_type])
+    metric_values,set_metric_values = ui.use_state([metrics[0]])
 
     # Filtering
     filt = {}
@@ -140,18 +155,18 @@ def arrange(t:Table):
 
     # Aggregations
     aggs = {}
-    aggs.update(aggregationControls(filterable,by_values,set_by_values,metrics,metric_value,set_metric_value))
-    aggs.update(aggregateTable(filt["filtered_table"],by_values,metric_value))
+    aggs.update(aggregationControls(filterable,by_values,set_by_values,metrics,metric_values,set_metric_values))
+    aggs.update(aggregateTable(filt["filtered_table"],by_values,metric_values))
 
     # Charting
     chrt = chartControls(chart_type,set_chart_type)
-    chrt["chart"] = chartTable(aggs["aggregated_table"],by_values,metric_value,chart_type)
+    chrt["chart"] = chartTable(aggs["aggregated_table"],by_values,metric_values,chart_type)
 
     # Arrange
     return ui.column(
         ui.row(
             ui.panel(filt["filter_text"],filt["clear_button"]," AND ".join(filt["filter_clauses"]),ui.flex(*filt["filter_buttons"],wrap="wrap"),title="Filtering controls"),
-            ui.panel(ui.flex(*aggs["by_buttons"],wrap="wrap"),aggs["metric_button"],title="Aggregation controls")),
+            ui.panel(ui.flex(*aggs["by_buttons"],wrap="wrap"),ui.flex(aggs["metric_button"],wrap="wrap"),title="Aggregation controls")),
         ui.row(
             ui.panel(filt["filtered_table"],title="Filtered table"),
             ui.panel(aggs["aggregated_table"],title="Aggregated table")
