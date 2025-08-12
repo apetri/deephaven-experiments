@@ -28,7 +28,6 @@ class Manager(object):
     def __init__(self,data:Table):
         self.data_ = data
 
-    @property
     def aggregations(self) -> typing.Dict:
         """
         Definitions of allowed aggregations
@@ -43,9 +42,8 @@ class Manager(object):
             "valuePred": agg.avg("valuePred")
         }
 
-    @property
     def chartTypes(self) -> typing.List[str]:
-        return ["bars"]
+        return ["bars","scatter"]
 
     def filterable(self) -> typing.List[str]:
         """
@@ -59,9 +57,12 @@ class Manager(object):
     ##############################################
     ##############################################
 
-    ## Below typically not touched by user
-    # Filtering
-    def filteringControls(self,filterable:typing.List[str],filter_values:typing.Dict,set_filter_values:typing.Callable) -> typing.Dict:
+    ### Below typically not touched by user
+
+    ## Filtering
+    def filteringControls(self,filter_values:typing.Dict,set_filter_values:typing.Callable) -> typing.Dict:
+
+        filterable = self.filterable()
 
         # Text box
         txt = ui.text(f"Filters: " + str({k:v for k,v in filter_values.items() if v is not None}))
@@ -71,9 +72,9 @@ class Manager(object):
 
             ui.combo_box(self.data_.select_distinct(c).sort(c),
                          key=c,
-                        label=c,
-                        selected_key=filter_values[c] if c in filter_values else None,
-                        on_change=lambda v,x=c: set_filter_values({**filter_values,x:v}))
+                         label=c,
+                         selected_key=filter_values[c] if c in filter_values else None,
+                         on_change=lambda v,x=c: set_filter_values({**filter_values,x:v}))
 
             for c in filterable
         ]
@@ -102,20 +103,59 @@ class Manager(object):
             "filtered_table" : tfilt
         }
 
-    # Aggregations
-    def aggregationControls(self,filterable:typing.List[str],by_values:typing.List,set_by_values:typing.Callable,metrics:typing.List[str],metric_values:typing.List[str],set_metric_values:typing.Callable) -> typing.Dict:
+    ## Aggregations
+    def byChoices(self,chart_type:str) -> typing.Dict:
+
+        filterable = self.filterable()
+
+        match chart_type:
+            case "bars":
+                return {
+                    "Primary by": filterable,
+                    "Secondary by": ["NONE"] + filterable,
+                    "Tertiary by": ["NONE"] + filterable
+                }
+            case "scatter":
+                return {
+                    "Primary by": filterable,
+                }
+            case _:
+                raise ValueError("Chart type not implemented")
+
+    def metricChoices(self,chart_type:str) -> typing.Dict:
+
+        metrics = list(self.aggregations().keys())
+
+        match chart_type:
+            case "bars":
+                return {
+                    "Aggregation metric": metrics,
+                }
+            case "scatter":
+                return {
+                    "Aggregation metric X": metrics,
+                    "Aggregation metric Y": metrics[1:] + [metrics[0]]
+                }
+            case _:
+                raise ValueError("Chart type not implemented")
+
+
+    def aggregationControls(self,chart_type:str,by_values:typing.List,set_by_values:typing.Callable,metric_values:typing.List[str],set_metric_values:typing.Callable) -> typing.Dict:
 
         # By buttons
+        by_choices = self.byChoices(chart_type)
+
         by_buttons = [
-            ui.picker(*filterable,selected_key=by_values[0],on_change=lambda v:set_by_values(self.amendList(by_values,0,v)),label="Primary by"),
-            ui.picker(*["NONE"]+filterable,selected_key=by_values[1],on_change=lambda v:set_by_values(self.amendList(by_values,1,v)),label="Secondary by"),
-            ui.picker(*["NONE"]+filterable,selected_key=by_values[2],on_change=lambda v:set_by_values(self.amendList(by_values,2,v)),label="Tertiary by")
+            ui.picker(*f,selected_key=by_values[i],on_change=lambda v,i=i:set_by_values(self.amendList(by_values,i,v)),label=k)
+            for i,(k,f) in enumerate(by_choices.items())
         ]
 
         # Aggregation metric buttons
+        metric_choices = self.metricChoices(chart_type)
+
         metric_buttons = [
-            ui.picker(*metrics,selected_key=m,on_change=lambda v,n=n:set_metric_values(self.amendList(metric_values,n,v)),label=f"Aggregation metric {n}")
-            for (n,m) in enumerate(metric_values)
+            ui.picker(*m,selected_key=metric_values[i],on_change=lambda v,i=i:set_metric_values(self.amendList(metric_values,i,v)),label=n)
+            for i,(n,m) in enumerate(metric_choices.items())
         ]
 
         # Done
@@ -124,71 +164,75 @@ class Manager(object):
             "metric_button" : metric_buttons,
         }
 
-    def aggregateTable(self,tfilt:Table,by_values:typing.List,metric_values:typing.List[str]) -> typing.Dict:
+    def aggregateTable(self,tfilt:Table,by_values:typing.List[str],metric_values:typing.List[str]) -> Table:
 
         # Run aggregations
         byv = [b for b in by_values if b!="NONE"]
-        tagg = ui.use_memo(lambda:tfilt.agg_by([self.aggregations[m] for m in metric_values],by=byv).sort(byv),[tfilt,by_values,metric_values])
+        tagg = tfilt.agg_by([self.aggregations()[m] for m in set(metric_values)],by=byv).sort(byv)
 
-        return {
-            "aggregated_table": tagg
-        }
+        return tagg
 
-    # Charting
-    def chartControls(self,chart_type:str,set_chart_type:typing.Callable) -> typing.Dict:
+    ## Charting
+    def toggleChartType(self,chart_type:str,set_chart_type:typing.Callable,set_by_values:typing.Callable,set_metric_values:typing.Callable):
+        set_chart_type(chart_type)
+        set_by_values([v[0] for n,v in self.byChoices(chart_type).items()])
+        set_metric_values([v[0] for n,v in self.metricChoices(chart_type).items()])
+
+    def chartControls(self,chart_type:str,set_chart_type:typing.Callable,set_by_values:typing.Callable,set_metric_values:typing.Callable) -> typing.Dict:
 
         # Graph type button
-        chart_button = ui.picker(*self.chartTypes,selected_key=chart_type,on_change=set_chart_type,label="Chart type")
+        chart_button = ui.picker(*self.chartTypes(),selected_key=chart_type,on_change=lambda v:self.toggleChartType(str(v),set_chart_type,set_by_values,set_metric_values),label="Chart type")
 
         return {
             "chart_button": chart_button
         }
 
-    def chartTable(self,tagg:Table,bys:typing.List[str],metrics:typing.List[str],chart_type:str):
+    def chartTable(self,chart_type:str,tagg:Table,bys:typing.List[str],metrics:typing.List[str]):
 
         byv = [b for b in bys if b!="NONE"]
 
         match chart_type:
             case "bars":
-                return ui.use_memo(lambda:traces.bars(tagg,byv,metrics[0]),[tagg,byv,metrics])
+                return traces.bars(tagg,byv,metrics[0])
+            case "scatter":
+                return traces.scatter(tagg,byv,metrics[0],metrics[1])
             case _:
                 raise ValueError(f"Chart type:{chart_type} not implemented")
 
     @ui.component
     def arrange(self):
 
-        filterable = self.filterable()
-
         # State management
-        filter_values,set_filter_values = ui.use_state({})
-        by_values,set_by_values = ui.use_state([filterable[0],"NONE","NONE"])
-        chart_type,set_chart_type = ui.use_state(self.chartTypes[0])
+        chart_type,set_chart_type = ui.use_state(self.chartTypes()[0])
 
-        metrics = ui.use_memo(lambda:list(self.aggregations.keys()),[chart_type])
-        metric_values,set_metric_values = ui.use_state([metrics[0]])
+        filter_values,set_filter_values = ui.use_state({})
+
+        by_values,set_by_values = ui.use_state([m[0] for n,m in self.byChoices(chart_type).items()])
+        metric_values,set_metric_values = ui.use_state([m[0] for n,m in self.metricChoices(chart_type).items()])
 
         # Filtering
         filt = {}
-        filt.update(self.filteringControls(filterable,filter_values,set_filter_values))
+        filt.update(self.filteringControls(filter_values,set_filter_values))
         filt.update(self.filterTable(filter_values))
 
-        # Aggregations
-        aggs = {}
-        aggs.update(self.aggregationControls(filterable,by_values,set_by_values,metrics,metric_values,set_metric_values))
-        aggs.update(self.aggregateTable(filt["filtered_table"],by_values,metric_values))
+        # Charting controls
+        chrtcntrl = self.chartControls(chart_type,set_chart_type,set_by_values,set_metric_values)
 
-        # Charting
-        chrt = self.chartControls(chart_type,set_chart_type)
-        chrt["chart"] = self.chartTable(aggs["aggregated_table"],by_values,metric_values,chart_type)
+        # Aggregations
+        aggcntrl = ui.use_memo(lambda:self.aggregationControls(chart_type,by_values,set_by_values,metric_values,set_metric_values),[chart_type,by_values,metric_values])
+        aggtbl = ui.use_memo(lambda:self.aggregateTable(filt["filtered_table"],by_values,metric_values),[filt["filtered_table"],by_values,metric_values])
+
+        # Chart
+        chrt = ui.use_memo(lambda:self.chartTable(chart_type,aggtbl,by_values,metric_values),[chart_type,aggtbl,by_values,metric_values])
 
         # Arrange
         return ui.column(
             ui.row(
                 ui.panel(filt["filter_text"],filt["clear_button"]," AND ".join(filt["filter_clauses"]),ui.flex(*filt["filter_buttons"],wrap="wrap"),title="Filtering controls"),
-                ui.panel(ui.flex(*aggs["by_buttons"],wrap="wrap"),ui.flex(aggs["metric_button"],wrap="wrap"),title="Aggregation controls")),
+                ui.panel(ui.flex(chrtcntrl["chart_button"]),ui.flex(*aggcntrl["by_buttons"],wrap="wrap"),ui.flex(aggcntrl["metric_button"],wrap="wrap"),title="Aggregation controls")),
             ui.row(
                 ui.panel(filt["filtered_table"],title="Filtered table"),
-                ui.panel(aggs["aggregated_table"],title="Aggregated table")
+                ui.panel(aggtbl,title="Aggregated table")
             ),
-            ui.row(ui.panel(chrt["chart_button"],chrt["chart"],title="Charted aggregated table"),height=60)
+            ui.row(ui.panel(chrt,title="Charted aggregated table"),height=60)
         )
