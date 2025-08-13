@@ -25,6 +25,10 @@ class Manager(object):
         self.data_ = data
         self.ctypes_ = dict(to_pandas(data.meta_table)[["Name","DataType"]].values)
         self.filterable_ = self.canFilter(data)
+    
+    @property
+    def data(self) -> Table:
+        return self.data_
 
     @property
     def ctypes(self) -> typing.Dict:
@@ -33,6 +37,15 @@ class Manager(object):
     @property
     def filterable(self) -> typing.List[str]:
         return self.filterable_
+    
+    @classmethod
+    def fetch(cls,callable:typing.Callable,*args,**kwargs):
+
+        """
+        Callable must return a deephaven Table
+        """
+
+        return cls(callable(*args,**kwargs))
 
     ##########################################################
 
@@ -45,12 +58,6 @@ class Manager(object):
         """
         return  {
             "count": agg.count_("count"),
-            "sum1": agg.sum_("sum1 = value1"),
-            "average1": agg.avg("average1 = value1"),
-            "average2": agg.avg("average2 = value2"),
-            "average3": agg.avg("average3 = value3"),
-            "valueObs": agg.avg("valueObs"),
-            "valuePred": agg.avg("valuePred")
         }
 
     def chartTypes(self) -> typing.List[str]:
@@ -60,10 +67,10 @@ class Manager(object):
         """
         Returns a list of columns that can be filtered on
         """
-        return [c for c in data.column_names if not c.startswith("value")]
+        return data.column_names
 
     def featureBuckets(self) -> typing.List[str]:
-        return ["n1"]
+        return []
 
     ##############################################
     ##############################################
