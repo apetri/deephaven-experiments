@@ -21,12 +21,23 @@ class Manager(object):
          l1[n] = v
          return l1
 
+    def __init__(self,data:Table):
+        self.data_ = data
+        self.ctypes_ = dict(to_pandas(data.meta_table)[["Name","DataType"]].values)
+        self.filterable_ = self.canFilter(data)
+
+    @property
+    def ctypes(self) -> typing.Dict:
+        return self.ctypes_
+
+    @property
+    def filterable(self) -> typing.List[str]:
+        return self.filterable_
+
     ##########################################################
 
     ## Editable by user
 
-    def __init__(self,data:Table):
-        self.data_ = data
 
     def aggregations(self) -> typing.Dict:
         """
@@ -43,15 +54,15 @@ class Manager(object):
         }
 
     def chartTypes(self) -> typing.List[str]:
-        return ["bars","scatter"]
+        return ["bars","oc_lines","ovp"]
 
-    def filterable(self) -> typing.List[str]:
+    def canFilter(self,data:Table) -> typing.List[str]:
         """
         Returns a list of columns that can be filtered on
         """
-        return [c for c in self.data_.column_names if not c.startswith("value")]
+        return [c for c in data.column_names if not c.startswith("value")]
 
-    def ovpBuckets(self) -> typing.List[str]:
+    def featureBuckets(self) -> typing.List[str]:
         return ["n1"]
 
     ##############################################
@@ -61,8 +72,6 @@ class Manager(object):
 
     ## Filtering
     def filteringControls(self,filter_values:typing.Dict,set_filter_values:typing.Callable) -> typing.Dict:
-
-        filterable = self.filterable()
 
         # Text box
         txt = ui.text(f"Filters: " + str({k:v for k,v in filter_values.items() if v is not None}))
@@ -76,7 +85,7 @@ class Manager(object):
                          selected_key=filter_values[c] if c in filter_values else None,
                          on_change=lambda v,x=c: set_filter_values({**filter_values,x:v}))
 
-            for c in filterable
+            for c in self.filterable
         ]
 
         # Clear all filters
@@ -106,7 +115,7 @@ class Manager(object):
     ## Aggregations
     def byChoices(self,chart_type:str) -> typing.Dict:
 
-        filterable = self.filterable()
+        filterable = self.filterable
 
         match chart_type:
             case "bars":
@@ -115,9 +124,16 @@ class Manager(object):
                     "Secondary by": ["NONE"] + filterable,
                     "Tertiary by": ["NONE"] + filterable
                 }
-            case "scatter":
+            case "oc_lines":
+                return {
+                    "Trace by": filterable,
+                    "Sweep by": filterable
+                }
+            case "ovp":
                 return {
                     "Primary by": filterable,
+                    "Secondary by": ["NONE"] + filterable,
+                    "Feature bucket": self.featureBuckets()
                 }
             case _:
                 raise ValueError("Chart type not implemented")
@@ -131,10 +147,15 @@ class Manager(object):
                 return {
                     "Aggregation metric": metrics,
                 }
-            case "scatter":
+            case "oc_lines":
                 return {
                     "Aggregation metric X": metrics,
                     "Aggregation metric Y": metrics[1:] + [metrics[0]]
+                }
+            case "ovp":
+                return {
+                    "Aggregation metric (prediction)": metrics,
+                    "Aggregation metric (observation)": metrics[1:] + [metrics[0]]
                 }
             case _:
                 raise ValueError("Chart type not implemented")
@@ -194,8 +215,10 @@ class Manager(object):
         match chart_type:
             case "bars":
                 return traces.bars(tagg,byv,metrics[0])
-            case "scatter":
-                return traces.scatter(tagg,byv,metrics[0],metrics[1])
+            case "oc_lines":
+                return traces.oc_lines(tagg,byv[0],metrics[0],metrics[1])
+            case "ovp":
+                return traces.ovp(tagg,byv[:-1],byv[-1],metrics)
             case _:
                 raise ValueError(f"Chart type:{chart_type} not implemented")
 
@@ -234,5 +257,5 @@ class Manager(object):
                 ui.panel(filt["filtered_table"],title="Filtered table"),
                 ui.panel(aggtbl,title="Aggregated table")
             ),
-            ui.row(ui.panel(chrt,title="Charted aggregated table"),height=60)
+            ui.row(ui.panel(chrt,title=f"Charted aggregation: {chart_type}"),height=60)
         )
