@@ -42,14 +42,14 @@ def ovp(t:Table,bys:typing.List[str],feat:str,metrics:typing.List[str]) -> go.Fi
     if len(bys)>1:
         t = t.update(f"{xc} = {bys[0]} + `.` + {bys[1]}")
 
-    lncnk = t.join(t.select_distinct(xc).update("linecnk_ = i"),on=xc).select([xc , f"{feat} = `` + {feat}" , "linecnk_"] + metrics)
+    lncnk = t.select([xc , f"{feat} = `` + {feat}"] + metrics)
 
     # Insert None between line chunks
 
     X = [[],[]]
     Y = [[] for i in range(len(metrics))]
 
-    for tbl in lncnk.partition_by("linecnk_").constituent_tables:
+    for tbl in lncnk.partition_by(xc).constituent_tables:
         df = to_pandas(tbl)
         for i,row in df.iterrows():
             X[0].append(row[xc])
