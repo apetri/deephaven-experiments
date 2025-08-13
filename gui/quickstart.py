@@ -1,14 +1,15 @@
 import typing
 
 from deephaven.table import Table
-from deephaven import empty_table,agg
+from deephaven import empty_table,time_table,input_table,agg
 
 from . import dashboard
 
-def randomTable(nrows:int) -> Table:
+class Example(dashboard.Manager):
 
-    t = empty_table(nrows)
-    t = t.update(
+    @classmethod
+    def random(cls,t:Table):
+        return t.update(
         [
             "cat1 = new String[]{`a`,`b`,`c`}[randomInt(0,3)]",
             "cat2 = new String[]{`DD`,`EE`,`FF`,`GG`}[randomInt(0,4)]",
@@ -23,9 +24,13 @@ def randomTable(nrows:int) -> Table:
         ]
     )
 
-    return t
-
-class Static(dashboard.Manager):
+    @classmethod
+    def static(cls,nrows:int=1000):
+        return cls(cls.random(empty_table(nrows)))
+    
+    @classmethod
+    def ticking(cls,period:str="PT1s"):
+        return cls(cls.random(time_table(period)))
 
     def aggregations(self) -> typing.Dict:
         """
@@ -45,10 +50,16 @@ class Static(dashboard.Manager):
         """
         Returns a list of columns that can be filtered on
         """
-        return [c for c in data.column_names if not c.startswith("value")]
+        return [c for c in data.column_names if (not c.startswith("value") and not c=="Timestamp")]
 
     def featureBuckets(self) -> typing.List[str]:
         return ["n1"]
 
-def make_static_example():
-    return Static.fetch(randomTable,nrows=100)
+###################################################
+###################################################
+
+def make_static_example(nrows:int=100):
+    return Example.static(nrows)
+
+def make_dynamic_example(period:str="PT1s"):
+    return Example.ticking(period)

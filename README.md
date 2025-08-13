@@ -8,5 +8,10 @@ Run this in a deephaven IDE
     from deephaven import ui
     import gui.quickstart
 
-    dm = gui.quickstart.make_static_example()
-    dash = ui.dashboard(dm.arrange())
+    # Static example with 1000 rows
+    dstatic = gui.quickstart.make_static_example(1000)
+    dash = ui.dashboard(dstatic.arrange())
+
+    # Dynamic example (not all charts update correctly)
+    dyn = gui.quickstart.make_dynamic example("PT1s")
+    dash = ui.dashboard(dyn.arrange())
