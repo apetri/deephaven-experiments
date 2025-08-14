@@ -1,7 +1,7 @@
 import typing
 
 from deephaven.table import Table
-from deephaven import empty_table,time_table,input_table,agg
+from deephaven import empty_table,time_table,agg
 
 from . import dashboard
 
@@ -20,7 +20,8 @@ class Example(dashboard.Manager):
             "value2 = n1 + random()",
             "value3 = n2 + 10*n1*n1 + random()",
             "valuePred = 4*n1",
-            "valueObs = -2.5 + random()*5 + 4*n1"
+            "valueObs = -2.5 + random()*5 + 4*n1",
+            "date = '2025-01-01' + 'P1D' * (int)(i/10)"
         ]
     )
 

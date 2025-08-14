@@ -72,3 +72,6 @@ def ovp(t:Table,bys:typing.List[str],feat:str,metrics:typing.List[str]) -> go.Fi
     fig.update_layout(xaxis_title=xc,yaxis_title="metrics")
 
     return fig
+
+def timeseries(t:Table,tc:str,by:str,metric:str) -> dx.DeephavenFigure:
+    return dx.line(t.update(f"{tc} = {tc}.toString()"),x=tc,y=metric,by=by,markers=True)

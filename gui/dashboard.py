@@ -9,14 +9,18 @@ from . import traces
 
 class Manager(object):
 
-    FORMATCLAUSE = {
-        "int" : lambda c,v:f"{c}={v}",
-        "double" : lambda c,v:f"{c}={v}",
-        "java.lang.String" : lambda c,v:f"{c}=`{v}`"
-    }
+    @staticmethod
+    def formatClause(typ:str,c:str,v) -> str:
+        match typ:
+            case "java.lang.String":
+                return f"{c}=`{v}`"
+            case "java.time.LocalDate":
+                return f"{c}='{v}'"
+            case _:
+                return f"{c}={v}"
 
     @staticmethod
-    def amendList(l0:typing.List,n:int,v):
+    def amendList(l0:typing.List,n:int,v) -> typing.List:
          l1 = l0.copy()
          l1[n] = v
          return l1
@@ -31,7 +35,7 @@ class Manager(object):
         return self.data_
 
     @property
-    def ctypes(self) -> typing.Dict:
+    def ctypes(self) -> typing.Dict[str,str]:
         return self.ctypes_
 
     @property
@@ -60,9 +64,6 @@ class Manager(object):
             "count": agg.count_("count"),
         }
 
-    def chartTypes(self) -> typing.List[str]:
-        return ["bars","oc_lines","ovp"]
-
     def canFilter(self,data:Table) -> typing.List[str]:
         """
         Returns a list of columns that can be filtered on
@@ -76,6 +77,23 @@ class Manager(object):
     ##############################################
 
     ### Below typically not touched by user
+
+    ## time-like columns (can be used in timeseries)
+    def timeCols(self) -> typing.List[str]:
+        return [ c for c,t in self.ctypes.items() if t=="java.time.LocalDate" ]
+
+    ## Supported chart types
+    def chartTypes(self) -> typing.List[str]:
+
+        chrts = ["bars","oc_lines"]
+
+        if len(self.timeCols()):
+            chrts.append("timeseries")
+    
+        if len(self.featureBuckets())>0:
+            chrts.append("ovp")
+    
+        return chrts
 
     ## Filtering
     def filteringControls(self,filter_values:typing.Dict,set_filter_values:typing.Callable) -> typing.Dict:
@@ -111,7 +129,7 @@ class Manager(object):
         ctyp = ui.use_memo(lambda: dict(to_pandas(self.data_.meta_table)[["Name","DataType"]].values),[self.data_])
 
         # Do the filtering
-        clauses = ui.use_memo(lambda:[self.FORMATCLAUSE[ctyp[x]](x,filter_values[x]) for x in filter_values if filter_values[x] is not None],[filter_values])
+        clauses = ui.use_memo(lambda:[self.formatClause(ctyp[x],x,filter_values[x]) for x in filter_values if filter_values[x] is not None],[filter_values])
         tfilt = ui.use_memo(lambda: self.data_.where(clauses),[self.data_,clauses])
 
         return {
@@ -136,6 +154,11 @@ class Manager(object):
                     "Trace by": filterable,
                     "Sweep by": filterable
                 }
+            case "timeseries":
+                return {
+                    "Time": self.timeCols(),
+                    "Trace by": [c for c in filterable if not c in self.timeCols() ]
+                }
             case "ovp":
                 return {
                     "Primary by": filterable,
@@ -158,6 +181,10 @@ class Manager(object):
                 return {
                     "Aggregation metric X": metrics,
                     "Aggregation metric Y": metrics[1:] + [metrics[0]]
+                }
+            case "timeseries":
+                return {
+                    "Aggregation metric": metrics
                 }
             case "ovp":
                 return {
@@ -221,11 +248,13 @@ class Manager(object):
 
         match chart_type:
             case "bars":
-                return traces.bars(tagg,byv,metrics[0])
+                return traces.bars(tagg,bys=byv,metric=metrics[0])
             case "oc_lines":
-                return traces.oc_lines(tagg,byv[0],metrics[0],metrics[1])
+                return traces.oc_lines(tagg,by=byv[0],mX=metrics[0],mY=metrics[1])
+            case "timeseries":
+                return traces.timeseries(tagg,tc=byv[0],by=byv[1],metric=metrics[0])
             case "ovp":
-                return traces.ovp(tagg,byv[:-1],byv[-1],metrics)
+                return traces.ovp(tagg,bys=byv[:-1],feat=byv[-1],metrics=metrics)
             case _:
                 raise ValueError(f"Chart type:{chart_type} not implemented")
 
@@ -266,3 +295,6 @@ class Manager(object):
             ),
             ui.row(ui.panel(chrt,title=f"Charted aggregation: {chart_type}"),height=60)
         )
+
+    def render(self):
+        return ui.dashboard(self.arrange())
