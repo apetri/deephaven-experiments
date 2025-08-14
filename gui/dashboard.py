@@ -16,6 +16,8 @@ class Manager(object):
                 return f"{c}=`{v}`"
             case "java.time.LocalDate":
                 return f"{c}='{v}'"
+            case "java.time.LocalTime":
+                return f"{c}='{v}'"
             case _:
                 return f"{c}={v}"
 
@@ -80,7 +82,7 @@ class Manager(object):
 
     ## time-like columns (can be used in timeseries)
     def timeCols(self) -> typing.List[str]:
-        return [ c for c,t in self.ctypes.items() if t=="java.time.LocalDate" ]
+        return [ c for c,t in self.ctypes.items() if t in ["java.time.LocalDate","java.time.LocalTime"] ]
 
     ## Supported chart types
     def chartTypes(self) -> typing.List[str]:

@@ -2,6 +2,7 @@ import typing
 
 from deephaven.table import Table
 from deephaven import empty_table,time_table,agg
+from deephaven.updateby import cum_sum
 
 from . import dashboard
 
@@ -9,8 +10,7 @@ class Example(dashboard.Manager):
 
     @classmethod
     def random(cls,t:Table):
-        return t.update(
-        [
+        t = t.update([
             "cat1 = new String[]{`a`,`b`,`c`}[randomInt(0,3)]",
             "cat2 = new String[]{`DD`,`EE`,`FF`,`GG`}[randomInt(0,4)]",
             "cat3 = new String[]{`fff`,`ggg`,`hhh`,`iii`,`lll`}[randomInt(0,4)]",
@@ -21,9 +21,15 @@ class Example(dashboard.Manager):
             "value3 = n2 + 10*n1*n1 + random()",
             "valuePred = 4*n1",
             "valueObs = -2.5 + random()*5 + 4*n1",
-            "date = '2025-01-01' + 'P1D' * (int)(i/10)"
+            "date = '2025-01-01' + 'P1D' * (int)(i/10)",
+            "idx = 1"
         ]
-    )
+        )
+
+        # Add intraday (local) time types
+        t = t.update_by(ops=[cum_sum(cols="idx")],by=["date"]).update(["minute = '09:29:00'.plusMinutes(idx)","second = '10:00:00'.plusSeconds(idx)"])
+
+        return t.drop_columns(["idx"])
 
     @classmethod
     def static(cls,nrows:int=1000):
