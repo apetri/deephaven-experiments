@@ -14,8 +14,8 @@ import databento as db
 
 import gui
 
-ZoneOffset = jpy.get_type("java.time.ZoneOffset")
-UTC = ZoneOffset.UTC
+UTC = jpy.get_type("java.time.ZoneOffset").UTC
+EST = jpy.get_type("java.time.ZoneId").of("America/New_York")
 
 def dbn2df(path:str) -> pd.DataFrame:
 
@@ -66,33 +66,36 @@ class MBP1(object):
     ]
     ).update("duration = parseDuration(durationstr)")
 
+    # Calculate mid
     @staticmethod
-    def returns(t:Table,lags:Table=LAGS) -> Table:
+    def mid(t:Table) -> Table:
+        return t.update("mid = 0.5*(bid_px_00 + ask_px_00)")
 
-        # Calculate mid
-        t = t.update("mid = 0.5*(bid_px_00 + ask_px_00)")
+    # Calculate returns
+    @staticmethod
+    def returns(samples:Table,universe:Table,lag:typing.Dict) -> Table:
 
-        # Calculate returns
-        for it in lags.iter_dict():
+        print(f"[+] Calculating {lag['horizon']} mid returns.")
 
-            print(f"[+] Calculating {it['horizon']} mid returns.")
+        samples = samples.update("ts_fwd = ts_event + '{0}'".format(lag["durationstr"]))
+        samples = samples.aj(table=universe,on=["ts_fwd>=ts_event"],joins=["mid_fwd = mid"])
+        samples = samples.update([f"mid_change_{lag['horizon']} = mid_fwd - mid",f"mid_ret_{lag['horizon']} = 1e4 * mid_change_{lag['horizon']} / mid"])
+        samples = samples.drop_columns(["ts_fwd","mid_fwd"])
 
-            t = t.update("ts_fwd = ts_event + '{0}'".format(it["durationstr"]))
-            t = t.aj(table=t,on=["ts_fwd>=ts_event"],joins=["mid_fwd = mid"])
-            t = t.update([f"mid_change_{it['horizon']} = mid_fwd - mid",f"mid_ret_{it['horizon']} = 1e4 * mid_change_{it['horizon']} / mid"])
-            t = t.drop_columns(["ts_fwd","mid_fwd"])
-
-        return t
+        return samples
 
     @staticmethod
-    def aggregateTrades(t:Table,by=["side"],lags:Table=LAGS) -> Table:
+    def analyzeTrades(t:Table,by=["side"],lags:Table=LAGS) -> Table:
 
         trd = t.where("action=`T`").update("date=ts_event.atZone(UTC).toLocalDate()")
         tagg = []
 
         for it in lags.iter_dict():
-            tagg.append(trd.agg_by([agg.count_("nsamples"),agg.avg(f"mid_change = mid_change_{it['horizon']}")],by=by).update([f"horizon = `{it['horizon']}`","unit = `price`"]))
-            tagg.append(trd.agg_by([agg.count_("nsamples"),agg.avg(f"mid_change = mid_ret_{it['horizon']}")],by=by).update([f"horizon = `{it['horizon']}`","unit = `bps`"]))
+
+            trdret = MBP1.returns(trd,t,it)
+
+            tagg.append(trdret.agg_by([agg.count_("nsamples"),agg.avg(f"mid_change = mid_change_{it['horizon']}")],by=by).update([f"horizon = `{it['horizon']}`","unit = `price`"]))
+            tagg.append(trdret.agg_by([agg.count_("nsamples"),agg.avg(f"mid_change = mid_ret_{it['horizon']}")],by=by).update([f"horizon = `{it['horizon']}`","unit = `bps`"]))
 
         return merge(tagg)
 

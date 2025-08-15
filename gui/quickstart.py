@@ -1,7 +1,7 @@
 import typing
 
-from deephaven.table import Table
 from deephaven import empty_table,time_table,agg
+from deephaven.table import Table
 from deephaven.updateby import cum_sum
 
 from . import dashboard
