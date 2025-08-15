@@ -1,7 +1,7 @@
 import os
-import datetime
 import typing
-import logging
+import datetime
+from functools import reduce
 
 import pandas as pd
 import databento as db
@@ -72,6 +72,25 @@ class Client():
         for r in queries.iterrows():
             self.onequery(mode="run",**r[1])
     
+    # List data persisted to disk
+    @staticmethod
+    def _splitpath(pth) -> pd.Series:
+        p1 = pth.split("/")
+        p2 = p1[-1].split(".")
+
+        return pd.Series({"date": p1[1], "dataset":".".join(p2[:2]),"schema":p2[-2]})
+
+    def ls(self) -> pd.DataFrame:
+        dirs = [ os.path.join(self.root_,x) for x in os.listdir(self.root_) if x.startswith("20") ]
+        files = [ [os.path.join(d,f) for f in os.listdir(d)] for d in dirs ]
+
+        df = pd.DataFrame({"filename": reduce(sum,files)})
+        df[["date","dataset","schema"]] = df.filename.apply(self._splitpath)
+
+        df.date = pd.DatetimeIndex(df.date)
+
+        return df
+
     ###################################################################
 
     # List all options for one underlier

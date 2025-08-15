@@ -31,6 +31,7 @@ class Manager(object):
         self.data_ = data
         self.ctypes_ = dict(to_pandas(data.meta_table)[["Name","DataType"]].values)
         self.filterable_ = self.canFilter(data)
+        self.sortable_ = self.canSort(data)
     
     @property
     def data(self) -> Table:
@@ -44,6 +45,10 @@ class Manager(object):
     def filterable(self) -> typing.List[str]:
         return self.filterable_
     
+    @property
+    def sortable(self) -> typing.List[str]:
+        return self.sortable_
+
     @classmethod
     def fetch(cls,callable:typing.Callable,*args,**kwargs):
 
@@ -69,6 +74,12 @@ class Manager(object):
     def canFilter(self,data:Table) -> typing.List[str]:
         """
         Returns a list of columns that can be filtered on
+        """
+        return data.column_names
+
+    def canSort(self,data:Table) -> typing.List[str]:
+        """
+        Returns a list of columns that can be explicitly be sorted on upon aggregation
         """
         return data.column_names
 
@@ -225,7 +236,7 @@ class Manager(object):
 
         # Run aggregations
         byv = [b for b in by_values if b!="NONE"]
-        tagg = tfilt.agg_by([self.aggregations()[m] for m in set(metric_values)],by=byv).sort(byv)
+        tagg = tfilt.agg_by([self.aggregations()[m] for m in set(metric_values)],by=byv).sort([b for b in byv if b in self.sortable])
 
         return tagg
 
