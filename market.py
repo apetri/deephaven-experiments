@@ -66,8 +66,8 @@ def ls():
 class MBP1(object):
 
     LAGS = new_table([
-        string_col("horizon",["10ms","100ms","1s","10s"]),
-        string_col("durationstr",["PT"+x for x in ["0.01s","0.1s","1s","10s"]])
+        string_col("horizon",["10ms","100ms","1s","10s","1min","10min"]),
+        string_col("durationstr",["PT"+x for x in ["0.01s","0.1s","1s","10s","1m","10m"]])
     ]
     ).update("duration = parseDuration(durationstr)")
 
@@ -107,8 +107,8 @@ class MBP1(object):
 
             trdret = MBP1.returns(trd,t,it)
 
-            tagg.append(trdret.agg_by([agg.count_("nsamples"),agg.avg(f"mid_change = mid_change_{it['horizon']}")],by=by).update([f"horizon = `{it['horizon']}`","unit = `price`"]))
-            tagg.append(trdret.agg_by([agg.count_("nsamples"),agg.avg(f"mid_change = mid_ret_{it['horizon']}")],by=by).update([f"horizon = `{it['horizon']}`","unit = `bps`"]))
+            tagg.append(trdret.agg_by([agg.count_("nsamples"),agg.avg(f"forecast = mid_change_forecast"),agg.avg(f"mid_change = mid_change_{it['horizon']}")],by=by).update([f"horizon = `{it['horizon']}`","unit = `price`"]))
+            tagg.append(trdret.update("mid_change_forecast = 1e4*mid_change_forecast / mid").agg_by([agg.count_("nsamples"),agg.avg(f"forecast = mid_change_forecast"),agg.avg(f"mid_change = mid_ret_{it['horizon']}")],by=by).update([f"horizon = `{it['horizon']}`","unit = `bps`"]))
 
         return merge(tagg)
 
@@ -121,14 +121,15 @@ class Visualization(gui.dashboard.Manager):
     def aggregations(self) -> typing.Dict:
         return  {
             "nsamples": agg.sum_("nsamples"),
-            "mid_change": agg.weighted_avg(wcol="nsamples",cols=["mid_change"])
+            "mid_change": agg.weighted_avg(wcol="nsamples",cols=["mid_change"]),
+            "forecast": agg.weighted_avg(wcol="nsamples",cols=["forecast"])
         }
 
     def canFilter(self,data:Table) -> typing.List[str]:
-        return [c for c in data.column_names if not c in ["mid_change","nsamples"]]
+        return [c for c in data.column_names if not c in ["mid_change","nsamples","forecast"]]
 
     def canSort(self,data:Table) -> typing.List[str]:
         return [c for c in data.column_names if not c in ["horizon"]]
 
     def featureBuckets(self) -> typing.List[str]:
-        return []
+        return ["feature_value"]

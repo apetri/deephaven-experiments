@@ -20,6 +20,7 @@ def bars(t:Table,bys:typing.List[str],metric:str) -> go.Figure:
 
     if N==1:
         fig.add_trace(go.Bar(x=df[bys[0]],y=df[metric],name=bys[0]))
+        fig.update_layout(xaxis_type="category")
     elif N>1:
         for n in df[bys[N-1]].unique():
             fig.add_trace(go.Bar(x=df[df[bys[N-1]]==n][bys].T,y=df[df[bys[N-1]]==n][metric],name=str(n)))
