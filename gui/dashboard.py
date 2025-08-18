@@ -28,27 +28,25 @@ class Manager(object):
          return l1
 
     def __init__(self,data:Table):
-        self.data_ = data
-        self.ctypes_ = dict(to_pandas(data.meta_table)[["Name","DataType"]].values)
-        self.filterable_ = self.canFilter(data)
-        self.sortable_ = self.canSort(data)
+
+        self._data = data
+        self._ctypes = dict(to_pandas(data.meta_table)[["Name","DataType"]].values)
+        self._filterable = self.canFilter(data)
+        self._sortable = self.canSort(data)
+
+        # State management, assigned later upon dashboard rendering
+        self._chart_type = "NONE"
+        self._set_chart_type = lambda v:None
+
+        self._filter_values = {"None":"None"}
+        self._set_filter_values = lambda v:None
+
+        self._by_values = ["None"]
+        self._set_by_values = lambda v:None
+
+        self._metric_values = ["None"]
+        self._set_metric_values = lambda v:None
     
-    @property
-    def data(self) -> Table:
-        return self.data_
-
-    @property
-    def ctypes(self) -> typing.Dict[str,str]:
-        return self.ctypes_
-
-    @property
-    def filterable(self) -> typing.List[str]:
-        return self.filterable_
-    
-    @property
-    def sortable(self) -> typing.List[str]:
-        return self.sortable_
-
     @classmethod
     def fetch(cls,callable:typing.Callable,*args,**kwargs):
 
@@ -57,6 +55,35 @@ class Manager(object):
         """
 
         return cls(callable(*args,**kwargs))
+
+    # Property getters
+    @property
+    def data(self) -> Table:
+        return self._data
+
+    @property
+    def ctypes(self) -> typing.Dict[str,str]:
+        return self._ctypes
+
+    @property
+    def filterable(self) -> typing.List[str]:
+        return self._filterable
+    
+    @property
+    def sortable(self) -> typing.List[str]:
+        return self._sortable
+
+    @property
+    def chart_type(self) -> str:
+        return self._chart_type
+
+    @property
+    def filter_values(self) -> typing.Dict:
+        return self._filter_values
+
+    @property
+    def by_values(self) -> typing.List[str]:
+        return self._by_values
 
     ##########################################################
 
@@ -109,25 +136,25 @@ class Manager(object):
         return chrts
 
     ## Filtering
-    def filteringControls(self,filter_values:typing.Dict,set_filter_values:typing.Callable) -> typing.Dict:
+    def filteringControls(self) -> typing.Dict:
 
         # Text box
-        txt = ui.text(f"Filters: " + str({k:v for k,v in filter_values.items() if v is not None}))
+        txt = ui.text(f"Filters: " + str({k:v for k,v in self._filter_values.items() if v is not None}))
 
         # Filter buttons
         filter_buttons = [
 
-            ui.combo_box(self.data_.select_distinct(c).sort(c),
+            ui.combo_box(self._data.select_distinct(c).sort(c),
                          key=c,
                          label=c,
-                         selected_key=filter_values[c] if c in filter_values else None,
-                         on_change=lambda v,x=c: set_filter_values({**filter_values,x:v}))
+                         selected_key=self._filter_values[c] if c in self._filter_values else None,
+                         on_change=lambda v,x=c: self._set_filter_values({**self._filter_values,x:v}))
 
             for c in self.filterable
         ]
 
         # Clear all filters
-        clear = ui.button("Clear all filters",on_press=lambda b: set_filter_values({x:None for x in filter_buttons}))
+        clear = ui.button("Clear all filters",on_press=lambda b: self._set_filter_values({x:None for x in filter_buttons}))
 
         # Done
         return {
@@ -139,11 +166,9 @@ class Manager(object):
 
     def filterTable(self,filter_values:typing.Dict) -> typing.Dict:
 
-        ctyp = ui.use_memo(lambda: dict(to_pandas(self.data_.meta_table)[["Name","DataType"]].values),[self.data_])
-
         # Do the filtering
-        clauses = ui.use_memo(lambda:[self.formatClause(ctyp[x],x,filter_values[x]) for x in filter_values if filter_values[x] is not None],[filter_values])
-        tfilt = ui.use_memo(lambda: self.data_.where(clauses),[self.data_,clauses])
+        clauses = ui.use_memo(lambda:[self.formatClause(self.ctypes[x],x,filter_values[x]) for x in filter_values if filter_values[x] is not None],[filter_values])
+        tfilt = ui.use_memo(lambda: self._data.where(clauses),[self._data,clauses])
 
         return {
             "filter_clauses" : clauses,
@@ -208,21 +233,21 @@ class Manager(object):
                 raise ValueError("Chart type not implemented")
 
 
-    def aggregationControls(self,chart_type:str,by_values:typing.List,set_by_values:typing.Callable,metric_values:typing.List[str],set_metric_values:typing.Callable) -> typing.Dict:
+    def aggregationControls(self) -> typing.Dict:
 
         # By buttons
-        by_choices = self.byChoices(chart_type)
+        by_choices = self.byChoices(self._chart_type)
 
         by_buttons = [
-            ui.picker(*f,selected_key=by_values[i],on_change=lambda v,i=i:set_by_values(self.amendList(by_values,i,v)),label=k)
+            ui.picker(*f,selected_key=self._by_values[i],on_change=lambda v,i=i:self._set_by_values(self.amendList(self._by_values,i,v)),label=k)
             for i,(k,f) in enumerate(by_choices.items())
         ]
 
         # Aggregation metric buttons
-        metric_choices = self.metricChoices(chart_type)
+        metric_choices = self.metricChoices(self._chart_type)
 
         metric_buttons = [
-            ui.picker(*m,selected_key=metric_values[i],on_change=lambda v,i=i:set_metric_values(self.amendList(metric_values,i,v)),label=n)
+            ui.picker(*m,selected_key=self._metric_values[i],on_change=lambda v,i=i:self._set_metric_values(self.amendList(self._metric_values,i,v)),label=n)
             for i,(n,m) in enumerate(metric_choices.items())
         ]
 
@@ -241,15 +266,15 @@ class Manager(object):
         return tagg
 
     ## Charting
-    def toggleChartType(self,chart_type:str,set_chart_type:typing.Callable,set_by_values:typing.Callable,set_metric_values:typing.Callable):
-        set_chart_type(chart_type)
-        set_by_values([v[0] for n,v in self.byChoices(chart_type).items()])
-        set_metric_values([v[0] for n,v in self.metricChoices(chart_type).items()])
+    def toggleChartType(self,chart_type:str):
+        self._set_chart_type(chart_type)
+        self._set_by_values([v[0] for n,v in self.byChoices(chart_type).items()])
+        self._set_metric_values([v[0] for n,v in self.metricChoices(chart_type).items()])
 
-    def chartControls(self,chart_type:str,set_chart_type:typing.Callable,set_by_values:typing.Callable,set_metric_values:typing.Callable) -> typing.Dict:
+    def chartControls(self,chart_type:str) -> typing.Dict:
 
         # Graph type button
-        chart_button = ui.picker(*self.chartTypes(),selected_key=chart_type,on_change=lambda v:self.toggleChartType(str(v),set_chart_type,set_by_values,set_metric_values),label="Chart type")
+        chart_button = ui.picker(*self.chartTypes(),selected_key=chart_type,on_change=lambda v:self.toggleChartType(str(v)),label="Chart type")
 
         return {
             "chart_button": chart_button
@@ -275,27 +300,27 @@ class Manager(object):
     def arrange(self):
 
         # State management
-        chart_type,set_chart_type = ui.use_state(self.chartTypes()[0])
+        self._chart_type,self._set_chart_type = ui.use_state(self.chartTypes()[0])
 
-        filter_values,set_filter_values = ui.use_state({})
+        self._filter_values,self._set_filter_values = ui.use_state({})
 
-        by_values,set_by_values = ui.use_state([m[0] for n,m in self.byChoices(chart_type).items()])
-        metric_values,set_metric_values = ui.use_state([m[0] for n,m in self.metricChoices(chart_type).items()])
+        self._by_values,self._set_by_values = ui.use_state([m[0] for n,m in self.byChoices(self._chart_type).items()])
+        self._metric_values,self._set_metric_values = ui.use_state([m[0] for n,m in self.metricChoices(self._chart_type).items()])
 
         # Filtering
         filt = {}
-        filt.update(self.filteringControls(filter_values,set_filter_values))
-        filt.update(self.filterTable(filter_values))
+        filt.update(self.filteringControls())
+        filt.update(self.filterTable(self._filter_values))
 
         # Charting controls
-        chrtcntrl = self.chartControls(chart_type,set_chart_type,set_by_values,set_metric_values)
+        chrtcntrl = self.chartControls(self._chart_type)
 
         # Aggregations
-        aggcntrl = ui.use_memo(lambda:self.aggregationControls(chart_type,by_values,set_by_values,metric_values,set_metric_values),[chart_type,by_values,metric_values])
-        aggtbl = ui.use_memo(lambda:self.aggregateTable(filt["filtered_table"],by_values,metric_values),[filt["filtered_table"],by_values,metric_values])
+        aggcntrl = ui.use_memo(lambda:self.aggregationControls(),[self._chart_type,self._by_values,self._metric_values])
+        aggtbl = ui.use_memo(lambda:self.aggregateTable(filt["filtered_table"],self._by_values,self._metric_values),[filt["filtered_table"],self._by_values,self._metric_values])
 
         # Chart
-        chrt = ui.use_memo(lambda:self.chartTable(chart_type,aggtbl,by_values,metric_values),[chart_type,aggtbl,by_values,metric_values])
+        chrt = ui.use_memo(lambda:self.chartTable(self._chart_type,aggtbl,self._by_values,self._metric_values),[self._chart_type,aggtbl,self._by_values,self._metric_values])
 
         # Arrange
         return ui.column(
@@ -306,7 +331,7 @@ class Manager(object):
                 ui.panel(filt["filtered_table"],title="Filtered table"),
                 ui.panel(aggtbl,title="Aggregated table")
             ),
-            ui.row(ui.panel(chrt,title=f"Charted aggregation: {chart_type}"),height=60)
+            ui.row(ui.panel(chrt,title=f"Charted aggregation: {self._chart_type}"),height=60)
         )
 
     def render(self):
