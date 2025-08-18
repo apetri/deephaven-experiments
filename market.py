@@ -7,6 +7,7 @@ from deephaven import agg,merge,new_table
 from deephaven.column import string_col
 from deephaven.pandas import to_table
 from deephaven.table import Table
+from deephaven.updateby import rolling_formula_tick
 
 import jpy
 
@@ -65,9 +66,9 @@ def ls():
 # Analysis for MBP-1 schema
 class MBP1(object):
 
-    LAGS = new_table([
-        string_col("horizon",["10ms","100ms","1s","10s","1min","10min"]),
-        string_col("durationstr",["PT"+x for x in ["0.01s","0.1s","1s","10s","1m","10m"]])
+    TIMELAGS = new_table([
+        string_col("horizon",["10ms","100ms","1s","10s","1min"]),
+        string_col("durationstr",["PT"+x for x in ["0.01s","0.1s","1s","10s","1m"]])
     ]
     ).update("duration = parseDuration(durationstr)")
 
@@ -98,17 +99,26 @@ class MBP1(object):
         return samples
 
     @staticmethod
-    def analyzeTrades(t:Table,by=["side"],lags:Table=LAGS) -> Table:
+    def analyzeTrades(t:Table,by=["side"],timelags:Table=TIMELAGS,ticklags = [1,5,10,50,100]) -> Table:
 
         trd = MBP1.buckets(t.where("action=`T`"))
         tagg = []
 
-        for it in lags.iter_dict():
+        # Time based lags
+        for it in timelags.iter_dict():
 
             trdret = MBP1.returns(trd,t,it)
 
-            tagg.append(trdret.agg_by([agg.count_("nsamples"),agg.avg(f"forecast = mid_change_forecast"),agg.avg(f"mid_change = mid_change_{it['horizon']}")],by=by).update([f"horizon = `{it['horizon']}`","unit = `price`"]))
-            tagg.append(trdret.update("mid_change_forecast = 1e4*mid_change_forecast / mid").agg_by([agg.count_("nsamples"),agg.avg(f"forecast = mid_change_forecast"),agg.avg(f"mid_change = mid_ret_{it['horizon']}")],by=by).update([f"horizon = `{it['horizon']}`","unit = `bps`"]))
+            tagg.append(trdret.agg_by([agg.count_("nsamples"),agg.avg(f"forecast = mid_change_forecast"),agg.avg(f"mid_change = mid_change_{it['horizon']}")],by=by).update([f"horizon = `{it['horizon']}`","unit = `price`","clock = `physical`"]))
+            tagg.append(trdret.update("mid_change_forecast = 1e4*mid_change_forecast / mid").agg_by([agg.count_("nsamples"),agg.avg(f"forecast = mid_change_forecast"),agg.avg(f"mid_change = mid_ret_{it['horizon']}")],by=by).update([f"horizon = `{it['horizon']}`","unit = `bps`","clock = `physical`"]))
+
+        # Tick based lags
+        for tk in ticklags:
+
+            trdret = trd.update_by(rolling_formula_tick(formula="mid_fwd = last(mid)",fwd_ticks=tk)).update(["mid_change = mid_fwd - mid","mid_ret = 1e4 * mid_change / mid"])
+
+            tagg.append(trdret.agg_by([agg.count_("nsamples"),agg.avg(f"forecast = mid_change_forecast"),agg.avg(f"mid_change")],by=by).update([f"horizon = `{tk}`","unit = `price`","clock = `ticks`"]))
+            tagg.append(trdret.update("mid_change_forecast = 1e4*mid_change_forecast / mid").agg_by([agg.count_("nsamples"),agg.avg(f"forecast = mid_change_forecast"),agg.avg(f"mid_change = mid_ret")],by=by).update([f"horizon = `{tk}`","unit = `bps`","clock = `ticks`"]))
 
         return merge(tagg)
 

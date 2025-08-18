@@ -138,9 +138,6 @@ class Manager(object):
     ## Filtering
     def filteringControls(self) -> typing.Dict:
 
-        # Text box
-        txt = ui.text(f"Filters: " + str({k:v for k,v in self._filter_values.items() if v is not None}))
-
         # Filter buttons
         filter_buttons = [
 
@@ -158,7 +155,6 @@ class Manager(object):
 
         # Done
         return {
-            "filter_text" : txt,
             "filter_buttons" : filter_buttons,
             "clear_button" : clear
         }
@@ -325,10 +321,10 @@ class Manager(object):
         # Arrange
         return ui.column(
             ui.row(
-                ui.panel(filt["filter_text"],filt["clear_button"]," AND ".join(filt["filter_clauses"]),ui.flex(*filt["filter_buttons"],wrap="wrap"),title="Filtering controls"),
+                ui.panel(filt["clear_button"],ui.flex(*filt["filter_buttons"],wrap="wrap"),title="Filtering controls"),
                 ui.panel(ui.flex(chrtcntrl["chart_button"]),ui.flex(*aggcntrl["by_buttons"],wrap="wrap"),ui.flex(aggcntrl["metric_button"],wrap="wrap"),title="Aggregation controls")),
             ui.row(
-                ui.panel(filt["filtered_table"],title="Filtered table"),
+                ui.panel(ui.text(" AND ".join(filt["filter_clauses"])),filt["filtered_table"],title="Filtered table"),
                 ui.panel(aggtbl,title="Aggregated table")
             ),
             ui.row(ui.panel(chrt,title=f"Charted aggregation: {self._chart_type}"),height=60)
