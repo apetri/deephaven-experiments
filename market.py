@@ -13,6 +13,7 @@ import jpy
 import databento as db
 
 import gui
+import data
 
 UTC = jpy.get_type("java.time.ZoneOffset").UTC
 EST = jpy.get_type("java.time.ZoneId").of("America/New_York")
@@ -54,6 +55,10 @@ def optionslist(path:str) -> Table:
 
     return opts.select(cols).drop_columns("ts_event")
 
+def ls():
+    clnt = data.Client()
+    return to_table(clnt.ls())
+
 #########################################
 #########################################
 
@@ -71,6 +76,14 @@ class MBP1(object):
     def mid(t:Table) -> Table:
         return t.update("mid = 0.5*(bid_px_00 + ask_px_00)")
 
+    # Binning buckets
+    @staticmethod
+    def buckets(t:Table):
+        t = t.update("date = ts_event.atZone(EST).toLocalDate()")
+        t = t.update("hour = lowerBin(ts_event,HOUR).atZone(EST).toLocalTime()")
+
+        return t.move_columns_up(["date","hour"])
+
     # Calculate returns
     @staticmethod
     def returns(samples:Table,universe:Table,lag:typing.Dict) -> Table:
@@ -87,7 +100,7 @@ class MBP1(object):
     @staticmethod
     def analyzeTrades(t:Table,by=["side"],lags:Table=LAGS) -> Table:
 
-        trd = t.where("action=`T`").update("date=ts_event.atZone(UTC).toLocalDate()")
+        trd = MBP1.buckets(t.where("action=`T`"))
         tagg = []
 
         for it in lags.iter_dict():
