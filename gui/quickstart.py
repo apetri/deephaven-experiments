@@ -53,6 +53,14 @@ class Example(dashboard.Manager):
             "valuePred": agg.avg("valuePred")
         }
 
+    def aggregateTable(self,tfilt:Table,chart_type:str,by_values:typing.List[str],metric_values:typing.List[str]) -> Table:
+
+        calcs = set(["count"] + metric_values if chart_type=="ovp" else metric_values)
+        byv = [b for b in by_values if b!="NONE"]
+        tagg = tfilt.agg_by([self.aggregations()[m] for m in calcs],by=byv).sort([b for b in byv if b in self.sortable])
+
+        return tagg
+
     def canFilter(self,data:Table) -> typing.List[str]:
         """
         Returns a list of columns that can be filtered on

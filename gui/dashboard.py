@@ -85,6 +85,10 @@ class Manager(object):
     def by_values(self) -> typing.List[str]:
         return self._by_values
 
+    @property
+    def metric_values(self) -> typing.List[str]:
+        return self._metric_values
+
     ##########################################################
 
     ## Editable by user
@@ -113,6 +117,14 @@ class Manager(object):
     def featureBuckets(self) -> typing.List[str]:
         return []
 
+    def aggregateTable(self,tfilt:Table,chart_type:str,by_values:typing.List[str],metric_values:typing.List[str]) -> Table:
+
+        # Run aggregations
+        byv = [b for b in by_values if b!="NONE"]
+        tagg = tfilt.agg_by([self.aggregations()[m] for m in set(metric_values)],by=byv).sort([b for b in byv if b in self.sortable])
+
+        return tagg
+
     ##############################################
     ##############################################
 
@@ -125,7 +137,7 @@ class Manager(object):
     ## Supported chart types
     def chartTypes(self) -> typing.List[str]:
 
-        chrts = ["bars","oc_lines"]
+        chrts = ["bars","lines"]
 
         if len(self.timeCols()):
             chrts.append("timeseries")
@@ -160,11 +172,11 @@ class Manager(object):
         }
 
 
-    def filterTable(self,filter_values:typing.Dict) -> typing.Dict:
+    def filterTable(self,filter_values:typing.Dict,bys:typing.List[str]) -> typing.Dict:
 
         # Do the filtering
-        clauses = ui.use_memo(lambda:[self.formatClause(self.ctypes[x],x,filter_values[x]) for x in filter_values if filter_values[x] is not None],[filter_values])
-        tfilt = ui.use_memo(lambda: self._data.where(clauses),[self._data,clauses])
+        clauses = [self.formatClause(self.ctypes[x],x,filter_values[x]) for x in filter_values if filter_values[x] is not None]
+        tfilt = self._data.where(clauses)
 
         return {
             "filter_clauses" : clauses,
@@ -183,7 +195,7 @@ class Manager(object):
                     "Secondary by": ["NONE"] + filterable,
                     "Tertiary by": ["NONE"] + filterable
                 }
-            case "oc_lines":
+            case "lines":
                 return {
                     "Trace by": filterable,
                     "Sweep by": filterable
@@ -211,7 +223,7 @@ class Manager(object):
                 return {
                     "Aggregation metric": metrics,
                 }
-            case "oc_lines":
+            case "lines":
                 return {
                     "Aggregation metric X": metrics,
                     "Aggregation metric Y": metrics[1:] + [metrics[0]]
@@ -253,14 +265,6 @@ class Manager(object):
             "metric_button" : metric_buttons,
         }
 
-    def aggregateTable(self,tfilt:Table,by_values:typing.List[str],metric_values:typing.List[str]) -> Table:
-
-        # Run aggregations
-        byv = [b for b in by_values if b!="NONE"]
-        tagg = tfilt.agg_by([self.aggregations()[m] for m in set(metric_values)],by=byv).sort([b for b in byv if b in self.sortable])
-
-        return tagg
-
     ## Charting
     def toggleChartType(self,chart_type:str):
         self._set_chart_type(chart_type)
@@ -283,8 +287,8 @@ class Manager(object):
         match chart_type:
             case "bars":
                 return traces.bars(tagg,bys=byv,metric=metrics[0])
-            case "oc_lines":
-                return traces.oc_lines(tagg,by=byv[0],mX=metrics[0],mY=metrics[1])
+            case "lines":
+                return traces.lines(tagg,by=byv[0],mX=metrics[0],mY=metrics[1])
             case "timeseries":
                 return traces.timeseries(tagg,tc=byv[0],by=byv[1],metric=metrics[0])
             case "ovp":
@@ -303,25 +307,24 @@ class Manager(object):
         self._by_values,self._set_by_values = ui.use_state([m[0] for n,m in self.byChoices(self._chart_type).items()])
         self._metric_values,self._set_metric_values = ui.use_state([m[0] for n,m in self.metricChoices(self._chart_type).items()])
 
-        # Filtering
-        filt = {}
-        filt.update(self.filteringControls())
-        filt.update(self.filterTable(self._filter_values))
-
-        # Charting controls
+        # Controls
+        filtcntrl = self.filteringControls()
         chrtcntrl = self.chartControls(self._chart_type)
+        aggcntrl = ui.use_memo(lambda:self.aggregationControls(),[self._chart_type,self._by_values,self._metric_values])
+
+        # Filtering
+        filt = ui.use_memo(lambda:self.filterTable(self._filter_values,self._by_values),[self._filter_values,self._by_values])
 
         # Aggregations
-        aggcntrl = ui.use_memo(lambda:self.aggregationControls(),[self._chart_type,self._by_values,self._metric_values])
-        aggtbl = ui.use_memo(lambda:self.aggregateTable(filt["filtered_table"],self._by_values,self._metric_values),[filt["filtered_table"],self._by_values,self._metric_values])
+        aggtbl = ui.use_memo(lambda:self.aggregateTable(filt["filtered_table"],self._chart_type,self._by_values,self._metric_values),[filt,self._chart_type,self._by_values,self._metric_values])
 
-        # Chart
+        # Charting
         chrt = ui.use_memo(lambda:self.chartTable(self._chart_type,aggtbl,self._by_values,self._metric_values),[self._chart_type,aggtbl,self._by_values,self._metric_values])
 
         # Arrange
         return ui.column(
             ui.row(
-                ui.panel(filt["clear_button"],ui.flex(*filt["filter_buttons"],wrap="wrap"),title="Filtering controls"),
+                ui.panel(filtcntrl["clear_button"],ui.flex(*filtcntrl["filter_buttons"],wrap="wrap"),title="Filtering controls"),
                 ui.panel(ui.flex(chrtcntrl["chart_button"]),ui.flex(*aggcntrl["by_buttons"],wrap="wrap"),ui.flex(aggcntrl["metric_button"],wrap="wrap"),title="Aggregation controls")),
             ui.row(
                 ui.panel(ui.text(" AND ".join(filt["filter_clauses"])),filt["filtered_table"],title="Filtered table"),
