@@ -67,6 +67,9 @@ class Example(dashboard.Manager):
         """
         return [c for c in data.column_names if (not c.startswith("value") and not c=="Timestamp")]
 
+    def mustConstrain(self) -> typing.List[str]:
+        return ["cat3"]
+
     def featureBuckets(self) -> typing.List[str]:
         return ["n1"]
 

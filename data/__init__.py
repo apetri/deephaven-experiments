@@ -90,7 +90,7 @@ class Client():
 
     def ls(self) -> pd.DataFrame:
         dirs = [ os.path.join(self._root,x) for x in os.listdir(self._root) if x.startswith("20") ]
-        files = [ [os.path.join(d,f) for f in os.listdir(d)] for d in dirs ]
+        files = [ [os.path.join(d,f) for f in os.listdir(d) if f.endswith(".dbn")] for d in dirs ]
 
         df = pd.DataFrame({"filename": reduce(sum,files)})
         df[["date","dataset","schema"]] = df.filename.apply(self._splitpath)

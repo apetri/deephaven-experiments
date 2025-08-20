@@ -141,5 +141,8 @@ class Visualization(gui.dashboard.Manager):
     def canSort(self,data:Table) -> typing.List[str]:
         return [c for c in data.column_names if not c in ["horizon"]]
 
+    def mustConstrain(self) -> typing.List[str]:
+        return ["horizon","clock","unit"]
+
     def featureBuckets(self) -> typing.List[str]:
         return ["feature_value"]

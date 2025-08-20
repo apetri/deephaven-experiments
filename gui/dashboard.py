@@ -114,6 +114,12 @@ class Manager(object):
         """
         return data.column_names
 
+    def mustConstrain(self) -> typing.List[str]:
+        """
+        Return list of columns that must have a value selected
+        """
+        return []
+
     def featureBuckets(self) -> typing.List[str]:
         return []
 
@@ -150,20 +156,33 @@ class Manager(object):
     ## Filtering
     def filteringControls(self) -> typing.Dict:
 
+        constrain = self.mustConstrain()
+        free = [c for c in self.filterable if not c in constrain ]
+
         # Filter buttons
         filter_buttons = [
 
             ui.combo_box(self._data.select_distinct(c).sort(c),
                          key=c,
                          label=c,
-                         selected_key=self._filter_values[c] if c in self._filter_values else None,
+                         selected_key=self._filter_values.get(c),
                          on_change=lambda v,x=c: self._set_filter_values({**self._filter_values,x:v}))
 
-            for c in self.filterable
+            for c in free
+        ]
+
+        filter_buttons += [
+            ui.picker(self._data.select_distinct(c).sort(c),
+                      key=c,
+                      label=c,
+                      selected_key=self._filter_values.get(c),
+                      on_change=lambda v,x=c: self._set_filter_values({**self._filter_values,x:v}))
+
+            for c in constrain
         ]
 
         # Clear all filters
-        clear = ui.button("Clear all filters",on_press=lambda b: self._set_filter_values({x:None for x in filter_buttons}))
+        clear = ui.button("Clear all filters",on_press=lambda b: self._set_filter_values({k:(None if k in free else v) for k,v in self._filter_values.items() }))
 
         # Done
         return {
@@ -171,11 +190,13 @@ class Manager(object):
             "clear_button" : clear
         }
 
-
     def filterTable(self,filter_values:typing.Dict,bys:typing.List[str]) -> typing.Dict:
 
         # Do the filtering
-        clauses = [self.formatClause(self.ctypes[x],x,filter_values[x]) for x in filter_values if filter_values[x] is not None]
+        # Exclude "must constrain clauses if that clause is in a by"
+        excl = [c for c in self.mustConstrain() if c in bys]
+
+        clauses = [self.formatClause(self.ctypes[x],x,filter_values[x]) for x in filter_values if (filter_values[x] is not None) and (not x in excl)]
         tfilt = self._data.where(clauses)
 
         return {
@@ -266,7 +287,7 @@ class Manager(object):
         }
 
     ## Charting
-    def toggleChartType(self,chart_type:str):
+    def _toggleChartType(self,chart_type:str):
         self._set_chart_type(chart_type)
         self._set_by_values([v[0] for n,v in self.byChoices(chart_type).items()])
         self._set_metric_values([v[0] for n,v in self.metricChoices(chart_type).items()])
@@ -274,7 +295,7 @@ class Manager(object):
     def chartControls(self,chart_type:str) -> typing.Dict:
 
         # Graph type button
-        chart_button = ui.picker(*self.chartTypes(),selected_key=chart_type,on_change=lambda v:self.toggleChartType(str(v)),label="Chart type")
+        chart_button = ui.picker(*self.chartTypes(),selected_key=chart_type,on_change=lambda v:self._toggleChartType(str(v)),label="Chart type")
 
         return {
             "chart_button": chart_button
@@ -302,7 +323,12 @@ class Manager(object):
         # State management
         self._chart_type,self._set_chart_type = ui.use_state(self.chartTypes()[0])
 
-        self._filter_values,self._set_filter_values = ui.use_state({})
+        mustcnstr = self.mustConstrain()
+        dflt:typing.Dict = {x:None for x in self.filterable}
+        if len(mustcnstr)>0:
+            dflt.update(next(self._data.iter_dict(cols=mustcnstr)))
+
+        self._filter_values,self._set_filter_values = ui.use_state(dflt)
 
         self._by_values,self._set_by_values = ui.use_state([m[0] for n,m in self.byChoices(self._chart_type).items()])
         self._metric_values,self._set_metric_values = ui.use_state([m[0] for n,m in self.metricChoices(self._chart_type).items()])
