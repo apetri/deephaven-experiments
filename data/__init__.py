@@ -11,24 +11,37 @@ class Client():
     def __init__(self,root="data/") -> None:
         self._client = db.Historical()
         self._root = root
+        self._feeds = None
 
     @property
     def client(self):
         return self._client
-    
+
+    @property
+    def feeds(self) -> pd.DataFrame|None:
+        return self._feeds
+
     # List all databento feeds
     def get_feeds(self):
 
         pth = os.path.join(self._root,"feeds.csv")
         if os.path.exists(pth):
-            return pd.read_csv(pth)
+
+            pub = pd.read_csv(pth)
+            pub["schemas"] = pub.schemas.fillna("").str.split("|")
+            self._feeds = pub
+
+            return None
 
         pub = pd.DataFrame(self._client.metadata.list_publishers())
         pub["schemas"] = pub.dataset.apply(lambda dn:self._client.metadata.list_schemas(dn))
 
+        self._feeds = pub.copy()
+
+        pub["schemas"] = pub.schemas.str.join("|")
         pub.to_csv(pth,index=False)
 
-        return pub
+        return None
     
     # Compose query dictionary
     def qdict(self,date:str,symbols:typing.List[str],dataset:str,schema:str,start:str="09:30",end:str="16:00",tz="America/New_York",stype_in:str="raw_symbol",limit=10000) -> typing.Dict:
@@ -98,6 +111,16 @@ class Client():
         df.date = pd.DatetimeIndex(df.date)
 
         return df
+
+    def lsbatch(self) -> pd.DataFrame:
+        r0 = os.path.join(self._root,"batch")
+        dirs = [ os.path.join(r0,x) for x in os.listdir(r0) ]
+        files = [ [os.path.join(d,f) for f in os.listdir(d) if f.endswith(".zst")] for d in dirs ]
+
+        df = pd.DataFrame({"filename": reduce(sum,files)})
+        df["jobid"] = df.filename.apply(lambda x:x.split("/")[2])
+
+        return df[["jobid","filename"]]
 
     ###################################################################
 

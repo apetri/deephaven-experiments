@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 
 from deephaven import agg,merge,new_table
-from deephaven.column import string_col
+from deephaven.column import string_col,double_col,int_col
 from deephaven.pandas import to_table
 from deephaven.table import Table
 from deephaven.updateby import rolling_formula_tick
@@ -59,6 +59,31 @@ def optionslist(path:str) -> Table:
 def ls():
     clnt = data.Client()
     return to_table(clnt.ls())
+
+def lsbatch():
+    clnt = data.Client()
+    return to_table(clnt.lsbatch())
+
+#########################################
+#########################################
+
+def binColumn(t:Table|None,orig:str,binned:str,binning:typing.Tuple) -> Table:
+
+    bkts = new_table([
+        double_col(f"{orig}",binning[0]),
+        double_col(f"{binned}",binning[1])
+        ]
+    )
+
+    if t is None:
+        return bkts
+
+    t = t.update(f"aux_abs = abs({orig})")
+    t = t.aj(table=bkts,on=f"aux_abs>={orig}",joins=f"{binned}")
+
+    t = t.update(f"{binned} = {binned} * Math.signum({orig})")
+
+    return t.drop_columns(["aux_abs"])
 
 #########################################
 #########################################
