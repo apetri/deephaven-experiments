@@ -350,13 +350,19 @@ class Manager(object):
         # Arrange
         return ui.column(
             ui.row(
-                ui.panel(filtcntrl["clear_button"],ui.flex(*filtcntrl["filter_buttons"],wrap="wrap"),title="Filtering controls"),
-                ui.panel(ui.flex(chrtcntrl["chart_button"]),ui.flex(*aggcntrl["by_buttons"],wrap="wrap"),ui.flex(aggcntrl["metric_button"],wrap="wrap"),title="Aggregation controls")),
-            ui.row(
-                ui.panel(ui.text(" AND ".join(filt["filter_clauses"])),filt["filtered_table"],title="Filtered table"),
-                ui.panel(aggtbl,title="Aggregated table")
+                ui.column(ui.panel(filtcntrl["clear_button"],ui.flex(*filtcntrl["filter_buttons"],wrap="wrap"),title="Filtering controls")),
+                ui.column(
+                    ui.panel(ui.flex(chrtcntrl["chart_button"]),ui.flex(*aggcntrl["by_buttons"],wrap="wrap"),ui.flex(aggcntrl["metric_button"],wrap="wrap"),title="Aggregation controls")
+                )
             ),
-            ui.row(ui.panel(chrt,title=f"Charted aggregation: {self._chart_type}"),height=60)
+            ui.row(
+                ui.stack(
+                    ui.panel(ui.text(" AND ".join(filt["filter_clauses"])),filt["filtered_table"],title="Filtered table"),
+                    ui.panel(aggtbl,title="Aggregated table"),
+                    ui.panel(chrt,title=f"Charted aggregation: {self._chart_type}"),height=60
+                ),
+                height=60
+            )
         )
 
     def render(self):

@@ -179,6 +179,9 @@ class Visualization(gui.dashboard.Manager):
         byv = [b for b in by_values if b!="NONE"]
         tagg = tfilt.agg_by([self.aggregations()[m] for m in calcs],by=byv).sort([b for b in byv if b in self.sortable])
 
+        if "feature_value" in by_values:
+            tagg = tagg.sort("feature_value")
+
         return tagg
 
     def canFilter(self,data:Table) -> typing.List[str]:
