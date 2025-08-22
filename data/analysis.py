@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 
 from deephaven import agg,merge,new_table
-from deephaven.column import string_col,double_col,int_col
+from deephaven.column import string_col,double_col
 from deephaven.pandas import to_table
 from deephaven.table import Table
 from deephaven.updateby import rolling_formula_tick
@@ -13,8 +13,8 @@ import jpy
 
 import databento as db
 
+from . import Client as dbClient
 import gui
-import data
 
 UTC = jpy.get_type("java.time.ZoneOffset").UTC
 EST = jpy.get_type("java.time.ZoneId").of("America/New_York")
@@ -57,11 +57,11 @@ def optionslist(path:str) -> Table:
     return opts.select(cols).drop_columns("ts_event")
 
 def ls():
-    clnt = data.Client()
+    clnt = dbClient()
     return to_table(clnt.ls())
 
 def lsbatch():
-    clnt = data.Client()
+    clnt = dbClient()
     return to_table(clnt.lsbatch())
 
 #########################################
@@ -114,8 +114,6 @@ class MBP1(object):
     @staticmethod
     def returns(samples:Table,universe:Table,lag:typing.Dict) -> Table:
 
-        print(f"[+] Calculating {lag['horizon']} mid returns.")
-
         samples = samples.update("ts_fwd = ts_event + '{0}'".format(lag["durationstr"]))
         samples = samples.aj(table=universe,on=["ts_fwd>=ts_event"],joins=["mid_fwd = mid"])
         samples = samples.update([f"mid_change_{lag['horizon']} = mid_fwd - mid",f"mid_ret_{lag['horizon']} = 1e4 * mid_change_{lag['horizon']} / mid"])
@@ -124,28 +122,43 @@ class MBP1(object):
         return samples
 
     @staticmethod
-    def analyzeTrades(t:Table,by=["side"],timelags:Table=TIMELAGS,ticklags = [1,5,10,50,100]) -> Table:
+    def analyzeEvents(evs:Table,univ:Table,feature_names:typing.List[str]=[],timelags:Table=TIMELAGS,ticklags = [1,5,10,50,100]) -> Table:
 
-        trd = MBP1.buckets(t.where("action=`T`"))
         tagg = []
 
         # Time based lags
         for it in timelags.iter_dict():
 
-            trdret = MBP1.returns(trd,t,it)
+            evret = MBP1.returns(evs,univ,it)
 
-            tagg.append(trdret.agg_by([agg.count_("nsamples"),agg.avg(f"forecast = mid_change_forecast"),agg.avg(f"mid_change = mid_change_{it['horizon']}")],by=by).update([f"horizon = `{it['horizon']}`","unit = `price`","clock = `physical`"]))
-            tagg.append(trdret.update("mid_change_forecast = 1e4*mid_change_forecast / mid").agg_by([agg.count_("nsamples"),agg.avg(f"forecast = mid_change_forecast"),agg.avg(f"mid_change = mid_ret_{it['horizon']}")],by=by).update([f"horizon = `{it['horizon']}`","unit = `bps`","clock = `physical`"]))
+            aggr_price = [agg.count_("nsamples"),agg.avg(f"forecast"),agg.avg(f"realized = mid_change_{it['horizon']}")]
+            aggr_bps =  [agg.count_("nsamples"),agg.avg(f"forecast = forecast_bps"),agg.avg(f"realized = mid_ret_{it['horizon']}")]
+
+            for feat in feature_names:
+
+                evret = evret.rename_columns([f"forecast = forecast_{feat}"]).update([f"feature_value = (double){feat}","forecast_bps = 1e4*forecast / mid"])
+
+                tagg.append(evret.agg_by(aggr_price,by=["feature_value"]).update([f"feature_name = `{feat}`",f"horizon = `{it['horizon']}`","unit = `price`","clock = `physical`"]))
+                tagg.append(evret.agg_by(aggr_bps,by=["feature_value"]).update([f"feature_name = `{feat}`",f"horizon = `{it['horizon']}`","unit = `bps`","clock = `physical`"]))
 
         # Tick based lags
+        aggr_price = [agg.count_("nsamples"),agg.avg(f"forecast"),agg.avg(f"realized = mid_change")]
+        aggr_bps =  [agg.count_("nsamples"),agg.avg(f"forecast = forecast_bps"),agg.avg(f"realized = mid_ret")]
+
         for tk in ticklags:
 
-            trdret = trd.update_by(rolling_formula_tick(formula="mid_fwd = last(mid)",fwd_ticks=tk)).update(["mid_change = mid_fwd - mid","mid_ret = 1e4 * mid_change / mid"])
+            univret = univ.update_by(rolling_formula_tick(formula="mid_fwd = last(mid)",fwd_ticks=tk)).update(["mid_change = mid_fwd - mid","mid_ret = 1e4 * mid_change / mid"])
+            evret = evs.join(univret.agg_by([agg.last("mid_change"),agg.last("mid_ret")],by="ts_event"),on="ts_event",joins=["mid_change","mid_ret"])
 
-            tagg.append(trdret.agg_by([agg.count_("nsamples"),agg.avg(f"forecast = mid_change_forecast"),agg.avg(f"mid_change")],by=by).update([f"horizon = `{tk}`","unit = `price`","clock = `ticks`"]))
-            tagg.append(trdret.update("mid_change_forecast = 1e4*mid_change_forecast / mid").agg_by([agg.count_("nsamples"),agg.avg(f"forecast = mid_change_forecast"),agg.avg(f"mid_change = mid_ret")],by=by).update([f"horizon = `{tk}`","unit = `bps`","clock = `ticks`"]))
+            for feat in feature_names:
+
+                evret = evret.rename_columns([f"forecast = forecast_{feat}"]).update([f"feature_value = (double){feat}","forecast_bps = 1e4*forecast / mid"])
+
+                tagg.append(evret.agg_by(aggr_price,by=["feature_value"]).update([f"feature_name = `{feat}`",f"horizon = `{tk}`","unit = `price`","clock = `ticks`"]))
+                tagg.append(evret.agg_by(aggr_bps,by=["feature_value"]).update([f"feature_name = `{feat}`",f"horizon = `{tk}`","unit = `bps`","clock = `ticks`"]))
 
         return merge(tagg)
+
 
 #########################################
 #########################################
@@ -156,18 +169,26 @@ class Visualization(gui.dashboard.Manager):
     def aggregations(self) -> typing.Dict:
         return  {
             "nsamples": agg.sum_("nsamples"),
-            "mid_change": agg.weighted_avg(wcol="nsamples",cols=["mid_change"]),
+            "realized": agg.weighted_avg(wcol="nsamples",cols=["realized"]),
             "forecast": agg.weighted_avg(wcol="nsamples",cols=["forecast"])
         }
 
+    def aggregateTable(self,tfilt:Table,chart_type:str,by_values:typing.List[str],metric_values:typing.List[str]) -> Table:
+
+        calcs = set(["nsamples"] + metric_values if chart_type=="ovp" else metric_values)
+        byv = [b for b in by_values if b!="NONE"]
+        tagg = tfilt.agg_by([self.aggregations()[m] for m in calcs],by=byv).sort([b for b in byv if b in self.sortable])
+
+        return tagg
+
     def canFilter(self,data:Table) -> typing.List[str]:
-        return [c for c in data.column_names if not c in ["mid_change","nsamples","forecast"]]
+        return [c for c in data.column_names if not c in ["nsamples","realized","forecast"]]
 
     def canSort(self,data:Table) -> typing.List[str]:
         return [c for c in data.column_names if not c in ["horizon"]]
 
     def mustConstrain(self) -> typing.List[str]:
-        return ["horizon","clock","unit"]
+        return ["horizon","clock","unit","feature_name"]
 
     def featureBuckets(self) -> typing.List[str]:
         return ["feature_value"]
