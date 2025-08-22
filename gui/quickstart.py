@@ -3,8 +3,9 @@ import typing
 from deephaven import empty_table,time_table,agg
 from deephaven.table import Table
 from deephaven.updateby import cum_sum
+from deephaven.appmode import ApplicationState, get_app_state
 
-from . import dashboard
+from gui import dashboard
 
 class Example(dashboard.Manager):
 
@@ -81,3 +82,23 @@ def make_static_example(nrows:int=100):
 
 def make_dynamic_example(period:str="PT1s"):
     return Example.ticking(period)
+
+###################################################
+###################################################
+
+def initializeApp():
+    app = get_app_state()
+
+    global static_data
+    global ticking_data
+
+    st = make_static_example(1000)
+    static_data = st.data
+    app["static"] = st.render()
+
+    dyn = make_dynamic_example("PT1s")
+    ticking_data = dyn.data
+    app["ticking"] = dyn.render()
+
+if __name__=="__main__":
+    initializeApp()
