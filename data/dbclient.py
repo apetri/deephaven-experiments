@@ -47,8 +47,14 @@ class DBHClient(Client):
     def lsbatch(self) -> Table:
         return dhpd.to_table(super().lsbatch())
 
-    def read(self,path:str):
+    def read(self,path:str) -> Table:
         return dhpd.to_table(dbn2df(path))
+
+    def readbatch(self,jobid:str) -> Table:
+        rec = next(self.lsbatch().where(f"jobid = `{jobid}`").iter_dict())
+        return self.read(rec["filename"])
+
+    #############################################################
 
     def plan(self,queries:Table):
 
@@ -69,6 +75,11 @@ class DBHClient(Client):
         ])
 
         return utils.hmerge(queries,ctbl)
+
+    def fetch(self,queries:Table,mode="run") -> None:
+        for i,qry in dhpd.to_pandas(queries).iterrows():
+            qry["date"] = qry["date"].strftime(r"%Y%m%d")
+            self.onequery(mode=mode,**qry)
 
     ################################################################################
     ################################################################################
