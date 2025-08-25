@@ -1,68 +1,11 @@
 import typing
 
-import pandas as pd
-import numpy as np
-
 from deephaven import agg,merge,new_table
 from deephaven.column import string_col,double_col
-from deephaven.pandas import to_table
 from deephaven.table import Table
 from deephaven.updateby import rolling_formula_tick
 
-import jpy
-
-import databento as db
-
-from . import Client as dbClient
 import gui
-
-UTC = jpy.get_type("java.time.ZoneOffset").UTC
-EST = jpy.get_type("java.time.ZoneId").of("America/New_York")
-
-def dbn2df(path:str) -> pd.DataFrame:
-
-    df = db.DBNStore.from_file(path).to_df()
-
-    # Cast unsigned to signed (java compatibility)
-    for c in df.dtypes[df.dtypes==np.uint8].index:
-        df[c] = df[c].astype(np.int32)
-    
-    for c in df.dtypes[df.dtypes==np.uint16].index:
-        df[c] = df[c].astype(np.int32)
-    
-    for c in df.dtypes[df.dtypes==np.uint32].index:
-        df[c] = df[c].astype(np.int64)
-    
-    for c in df.dtypes[df.dtypes==np.uint64].index:
-        df[c] = df[c].astype(np.int64)
-
-    return df
-
-def dbn2table(path:str) -> Table:
-    return to_table(dbn2df(path))
-
-#########################################
-#########################################
-
-def optionslist(path:str) -> Table:
-    opts = dbn2table(path)
-    
-    cols = ["date"] + [c.name for c in opts.columns]
-    
-    opts = opts.update([
-        "date = ts_event.atZone(UTC).toLocalDate()",
-        "expiration = expiration.atZone(UTC).toLocalDate()"
-    ])
-
-    return opts.select(cols).drop_columns("ts_event")
-
-def ls():
-    clnt = dbClient()
-    return to_table(clnt.ls())
-
-def lsbatch():
-    clnt = dbClient()
-    return to_table(clnt.lsbatch())
 
 #########################################
 #########################################
@@ -105,8 +48,8 @@ class MBP1(object):
     # Binning buckets
     @staticmethod
     def buckets(t:Table):
-        t = t.update("date = ts_event.atZone(EST).toLocalDate()")
-        t = t.update("hour = lowerBin(ts_event,HOUR).atZone(EST).toLocalTime()")
+        t = t.update("date = ts_event.atZone('EST').toLocalDate()")
+        t = t.update("hour = lowerBin(ts_event,HOUR).atZone('EST').toLocalTime()")
 
         return t.move_columns_up(["date","hour"])
 
@@ -148,7 +91,7 @@ class MBP1(object):
         for tk in ticklags:
 
             univret = univ.update_by(rolling_formula_tick(formula="mid_fwd = last(mid)",fwd_ticks=tk)).update(["mid_change = mid_fwd - mid","mid_ret = 1e4 * mid_change / mid"])
-            evret = evs.join(univret.agg_by([agg.last("mid_change"),agg.last("mid_ret")],by="ts_event"),on="ts_event",joins=["mid_change","mid_ret"])
+            evret = evs.natural_join(univret.agg_by([agg.last("mid_change"),agg.last("mid_ret")],by="ts_event"),on="ts_event",joins=["mid_change","mid_ret"])
 
             for feat in feature_names:
 
