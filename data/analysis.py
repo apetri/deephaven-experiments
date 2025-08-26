@@ -47,6 +47,7 @@ class MBP1(object):
 
         data = dbclient.read(path) if path.startswith(dbclient._root) else dbclient.readbatch(path)
         data = data.update("mid = 0.5*(bid_px_00 + ask_px_00)")
+        data = data.sort("ts_event")
 
         self._universe = data
 
@@ -123,6 +124,13 @@ class MBP1(object):
 # Analysis for TCBBO schema (option trades)
 class TCBBO(object):
 
+    AGGREGATIONS = [
+        agg.count_("num_samples"),
+        agg.sum_("num_contracts = size"),
+        agg.formula("net_contracts_delta = sum(size*sidedelta)"),
+        agg.formula("net_contracts = sum(size*sideimpl)")
+    ]
+
     def __init__(self,dbclient:dbclient.DBHClient,path:str,date:str="20250801") -> None:
 
         self._dbclient = dbclient
@@ -139,7 +147,10 @@ class TCBBO(object):
         data = data.update(["bid_px_00 = isNaN(bid_px_00) ? NEG_INF_DOUBLE : bid_px_00","ask_px_00 = isNaN(ask_px_00) ? POS_INF_DOUBLE : ask_px_00"])
 
         # Implied side
-        data = data.update("sideimpl = price<=bid_px_00 ? -1 : (price>=ask_px_00 ? 1 : NULL_INT)")
+        data = data.update([
+            "sideimpl = price<=bid_px_00 ? -1 : (price>=ask_px_00 ? 1 : NULL_INT)",
+            "sidedelta = sideimpl * (typ = `C` ? 1 : -1)"])
+
         self._universe = data
 
     @property
@@ -149,6 +160,26 @@ class TCBBO(object):
     @property
     def universe(self) -> Table:
         return self._universe
+
+    ##################################################
+
+    def asof(self,oth:Table,joins:typing.List[str]) -> Table:
+        return self._universe.aj(oth,on="ts_event",joins=["ts_eq = ts_event"] + joins)
+
+    ##################################################
+
+    def analyzeEvents(self,oth:Table,features:typing.List[str],bys:typing.List[str]) -> Table:
+
+        # Ignore unsigned trades
+        optrd = self.asof(oth,features).where("!isNull(sideimpl)")
+
+        # Collect aggregations
+        trdagg = []
+        for fn in features:
+            trdagg.append(optrd.where(f"!isNull({fn})").rename_columns([f"feature_value = {fn}"]).agg_by(self.AGGREGATIONS,by=["feature_value"] + bys).sort(bys + ["feature_value"]).update(f"feature_name = `{fn}`"))
+
+        # Done
+        return merge(trdagg)
 
 #########################################
 #########################################
