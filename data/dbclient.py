@@ -37,6 +37,11 @@ def dbn2df(path:str) -> pd.DataFrame:
 
 class DBHClient(Client):
 
+    def __init__(self, root="data/") -> None:
+        super().__init__(root)
+        self.get_feeds()
+        self._feeds.publisher_id = self._feeds.publisher_id.astype(np.int32)
+
     @property
     def feeds(self) -> Table:
         return dhpd.to_table(self._feeds)
@@ -60,6 +65,7 @@ class DBHClient(Client):
 
         cost = []
         num_records = []
+        sizegb = []
 
         # Calculate cost with databento api
         for i,qry in dhpd.to_pandas(queries).iterrows():
@@ -67,11 +73,13 @@ class DBHClient(Client):
             res = self.cost(**qry)
             cost.append(res["cost"])
             num_records.append(res["num_records"])
+            sizegb.append(res["size_gb"])
 
         # Enrich original table
         ctbl = new_table([
             long_col("num_records",num_records),
-            double_col("cost",cost)
+            double_col("cost",cost),
+            double_col("size_gb",sizegb)
         ])
 
         return utils.hmerge(queries,ctbl)
@@ -84,7 +92,7 @@ class DBHClient(Client):
     ################################################################################
     ################################################################################
 
-    def options(self,date:str) -> Table:
+    def options(self,date:str="20250801") -> Table:
 
         opts = self.read(self.path(date,"OPRA.PILLAR","definition"))
 
@@ -102,6 +110,12 @@ class DBHClient(Client):
     def byDays2exp(opts:Table) -> Table:
         return opts.select(["date","underlying","symbols = symbol","days2expiry"]).group_by(["date","underlying","days2expiry"]).update("num_securities = symbols.size()")
 
+    @staticmethod
+    def bySymbol(opts:Table) -> Table:
+        opts = opts.select(["date","underlying","symbol"]).group_by(["date","underlying"]).update("num_securities = symbol.size()")
+        opts = opts.update(["symbols = underlying + `.OPT`","stype_in = `parent`"])
+        return opts.drop_columns(["symbol"])
+
     def makeQueryTable(self,opts:Table,filt:typing.Callable[[Table],Table]=byDays2exp,start="09:30",end="16:00",schema="trades",dataset="OPRA.PILLAR"):
 
         qrys = filt(opts)
@@ -117,3 +131,6 @@ class DBHClient(Client):
         ])
 
         return qrys
+
+    ################################################################################
+    ################################################################################

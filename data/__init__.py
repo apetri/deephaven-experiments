@@ -1,6 +1,6 @@
 import os
 import typing
-from functools import reduce
+import itertools
 
 import pandas as pd
 import databento as db
@@ -64,8 +64,10 @@ class Client():
         start = dct["start"]
         del(dct["start"])
 
-        return {"num_records" : self._client.metadata.get_record_count(start=start,**dct), "cost" : self._client.metadata.get_cost(start=start,**dct)}
-    
+        return {"num_records" : self._client.metadata.get_record_count(start=start,**dct),
+                "cost" : self._client.metadata.get_cost(start=start,**dct),
+                "size_gb": self._client.metadata.get_billable_size(start=start,**dct) / 1024**3}
+
     # Run one query
     def onequery(self,mode="",**kwargs) -> typing.Dict|db.DBNStore:
         dct = self.qdict(**kwargs)
@@ -104,7 +106,7 @@ class Client():
         dirs = [ os.path.join(self._root,x) for x in os.listdir(self._root) if x.startswith("20") ]
         files = [ [os.path.join(d,f) for f in os.listdir(d) if f.endswith(".dbn")] for d in dirs ]
 
-        df = pd.DataFrame({"filename": reduce(sum,files)})
+        df = pd.DataFrame({"filename": list(itertools.chain(*files))})
         df[["date","dataset","schema"]] = df.filename.apply(self._splitpath)
 
         df.date = pd.DatetimeIndex(df.date)
@@ -116,7 +118,7 @@ class Client():
         dirs = [ os.path.join(r0,x) for x in os.listdir(r0) ]
         files = [ [os.path.join(d,f) for f in os.listdir(d) if f.endswith(".zst")] for d in dirs ]
 
-        df = pd.DataFrame({"filename": reduce(sum,files)})
+        df = pd.DataFrame({"filename": list(itertools.chain(*files))})
         df["jobid"] = df.filename.apply(lambda x:x.split("/")[2])
 
         return df[["jobid","filename"]]

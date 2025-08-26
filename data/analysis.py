@@ -5,6 +5,7 @@ from deephaven.column import string_col,double_col
 from deephaven.table import Table
 from deephaven.updateby import rolling_formula_tick
 
+from . import dbclient
 import gui
 
 #########################################
@@ -31,7 +32,7 @@ def binColumn(t:Table|None,orig:str,binned:str,binning:typing.Tuple) -> Table:
 #########################################
 #########################################
 
-# Analysis for MBP-1 schema
+# Analysis for MBP-1 schema (equities)
 class MBP1(object):
 
     TIMELAGS = new_table([
@@ -40,10 +41,29 @@ class MBP1(object):
     ]
     ).update("duration = parseDuration(durationstr)")
 
-    # Calculate mid
-    @staticmethod
-    def mid(t:Table) -> Table:
-        return t.update("mid = 0.5*(bid_px_00 + ask_px_00)")
+    def __init__(self,dbclient:dbclient.DBHClient,path:str) -> None:
+
+        self._dbclient = dbclient
+
+        data = dbclient.read(path) if path.startswith(dbclient._root) else dbclient.readbatch(path)
+        data = data.update("mid = 0.5*(bid_px_00 + ask_px_00)")
+
+        self._universe = data
+
+    @property
+    def dbclient(self) -> dbclient.DBHClient:
+        return self._dbclient
+
+    @property
+    def universe(self) -> Table:
+        return self._universe
+
+    def trades(self) -> Table:
+        trd = self.universe.where("action = `T`")
+        trd = trd.update("sideimpl = price<=bid_px_00 ? -1 : (price>=ask_px_00 ? 1 : NULL_INT)")
+        return trd
+
+    ################################################################################################
 
     # Binning buckets
     @staticmethod
@@ -54,25 +74,23 @@ class MBP1(object):
         return t.move_columns_up(["date","hour"])
 
     # Calculate returns
-    @staticmethod
-    def returns(samples:Table,universe:Table,lag:typing.Dict) -> Table:
+    def returns(self,samples:Table,lag:typing.Dict) -> Table:
 
         samples = samples.update("ts_fwd = ts_event + '{0}'".format(lag["durationstr"]))
-        samples = samples.aj(table=universe,on=["ts_fwd>=ts_event"],joins=["mid_fwd = mid"])
+        samples = samples.aj(table=self.universe,on=["ts_fwd>=ts_event"],joins=["mid_fwd = mid"])
         samples = samples.update([f"mid_change_{lag['horizon']} = mid_fwd - mid",f"mid_ret_{lag['horizon']} = 1e4 * mid_change_{lag['horizon']} / mid"])
         samples = samples.drop_columns(["ts_fwd","mid_fwd"])
 
         return samples
 
-    @staticmethod
-    def analyzeEvents(evs:Table,univ:Table,feature_names:typing.List[str]=[],timelags:Table=TIMELAGS,ticklags = [1,5,10,50,100]) -> Table:
+    def analyzeEvents(self,evs:Table,feature_names:typing.List[str]=[],timelags:Table=TIMELAGS,ticklags = [1,5,10,50,100]) -> Table:
 
         tagg = []
 
         # Time based lags
         for it in timelags.iter_dict():
 
-            evret = MBP1.returns(evs,univ,it)
+            evret = self.returns(evs,it)
 
             aggr_price = [agg.count_("nsamples"),agg.avg(f"forecast"),agg.avg(f"realized = mid_change_{it['horizon']}")]
             aggr_bps =  [agg.count_("nsamples"),agg.avg(f"forecast = forecast_bps"),agg.avg(f"realized = mid_ret_{it['horizon']}")]
@@ -90,7 +108,7 @@ class MBP1(object):
 
         for tk in ticklags:
 
-            univret = univ.update_by(rolling_formula_tick(formula="mid_fwd = last(mid)",fwd_ticks=tk)).update(["mid_change = mid_fwd - mid","mid_ret = 1e4 * mid_change / mid"])
+            univret = self.universe.update_by(rolling_formula_tick(formula="mid_fwd = last(mid)",fwd_ticks=tk)).update(["mid_change = mid_fwd - mid","mid_ret = 1e4 * mid_change / mid"])
             evret = evs.natural_join(univret.agg_by([agg.last("mid_change"),agg.last("mid_ret")],by="ts_event"),on="ts_event",joins=["mid_change","mid_ret"])
 
             for feat in feature_names:
@@ -102,6 +120,35 @@ class MBP1(object):
 
         return merge(tagg)
 
+# Analysis for TCBBO schema (option trades)
+class TCBBO(object):
+
+    def __init__(self,dbclient:dbclient.DBHClient,path:str,date:str="20250801") -> None:
+
+        self._dbclient = dbclient
+
+        opts = dbclient.options(date)
+        data = dbclient.read(path) if path.startswith(dbclient._root) else dbclient.readbatch(path)
+
+        data = data.natural_join(dbclient.feeds,on="publisher_id",joins="venue")
+        data = data.natural_join(opts,on="instrument_id",joins=["days2expiry","typ = instrument_class","strike_price"])
+
+        # Replace NaN
+        NEG_INF_DOUBLE = float("-inf")
+        POS_INF_DOUBLE = float("inf")
+        data = data.update(["bid_px_00 = isNaN(bid_px_00) ? NEG_INF_DOUBLE : bid_px_00","ask_px_00 = isNaN(ask_px_00) ? POS_INF_DOUBLE : ask_px_00"])
+
+        # Implied side
+        data = data.update("sideimpl = price<=bid_px_00 ? -1 : (price>=ask_px_00 ? 1 : NULL_INT)")
+        self._universe = data
+
+    @property
+    def dbclient(self) -> dbclient.DBHClient:
+        return self._dbclient
+
+    @property
+    def universe(self) -> Table:
+        return self._universe
 
 #########################################
 #########################################
