@@ -54,13 +54,14 @@ class Example(dashboard.Manager):
             "valuePred": agg.avg("valuePred")
         }
 
-    def aggregateTable(self,tfilt:Table,chart_type:str,by_values:typing.List[str],metric_values:typing.List[str]) -> Table:
+    def derived(self) -> typing.Dict:
+        """
+        Derived aggregations: name -> (definition,[dependencies])
+        """
 
-        calcs = set(["count"] + metric_values if chart_type=="ovp" else metric_values)
-        byv = [b for b in by_values if b!="NONE"]
-        tagg = tfilt.agg_by([self.aggregations()[m] for m in calcs],by=byv).sort([b for b in byv if b in self.sortable])
-
-        return tagg
+        return {
+            "ratio12" : ("average1/average2",["average1","average2"])
+        }
 
     def canFilter(self,data:Table) -> typing.List[str]:
         """
@@ -89,12 +90,15 @@ def make_dynamic_example(period:str="PT1s"):
 def initializeApp():
     app = get_app_state()
 
+    global st
     global static_data
-    global ticking_data
 
     st = make_static_example(1000)
     static_data = st.data
     app["static"] = st.render()
+
+    global dyn
+    global ticking_data
 
     dyn = make_dynamic_example("PT1s")
     ticking_data = dyn.data

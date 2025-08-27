@@ -11,7 +11,7 @@ import gui
 #########################################
 #########################################
 
-def binColumn(t:Table|None,orig:str,binned:str,binning:typing.Tuple) -> Table:
+def binColumn(t:Table|None,orig:str,binned:str,binning:typing.Tuple,signed:bool=True) -> Table:
 
     bkts = new_table([
         double_col(f"{orig}",binning[0]),
@@ -22,12 +22,13 @@ def binColumn(t:Table|None,orig:str,binned:str,binning:typing.Tuple) -> Table:
     if t is None:
         return bkts
 
-    t = t.update(f"aux_abs = abs({orig})")
-    t = t.aj(table=bkts,on=f"aux_abs>={orig}",joins=f"{binned}")
+    t = t.update(f"__aux = abs({orig})" if signed else f"__aux = {orig}")
+    t = t.aj(table=bkts,on=f"__aux>={orig}",joins=f"{binned}")
 
-    t = t.update(f"{binned} = {binned} * Math.signum({orig})")
+    if signed:
+        t = t.update(f"{binned} = {binned} * Math.signum({orig})")
 
-    return t.drop_columns(["aux_abs"])
+    return t.drop_columns(["__aux"])
 
 #########################################
 #########################################
@@ -173,10 +174,13 @@ class TCBBO(object):
         # Ignore unsigned trades
         optrd = self.asof(oth,features).where("!isNull(sideimpl)")
 
+        # Bucketing
+        optrd = binColumn(optrd.update("days2expiry = (double)days2expiry"),orig="days2expiry",binned="days2expiry_bkt",binning=([0,1,10,21,64,100],[0,1,10,21,64,100]))
+
         # Collect aggregations
         trdagg = []
         for fn in features:
-            trdagg.append(optrd.where(f"!isNull({fn})").rename_columns([f"feature_value = {fn}"]).agg_by(self.AGGREGATIONS,by=["feature_value"] + bys).sort(bys + ["feature_value"]).update(f"feature_name = `{fn}`"))
+            trdagg.append(optrd.where(f"!isNull({fn})").rename_columns([f"feature_value = {fn}"]).agg_by(self.AGGREGATIONS,by=["feature_value"] + bys).sort(bys + ["feature_value"]).update([f"feature_name = `{fn}`","feature_value_abs = abs(feature_value)"]))
 
         # Done
         return merge(trdagg)
@@ -184,8 +188,8 @@ class TCBBO(object):
 #########################################
 #########################################
 
-# Visualize in GUI
-class Visualization(gui.dashboard.Manager):
+# Visualize in GUI: MBP1 analysis
+class Mbp1Gui(gui.dashboard.Manager):
 
     def aggregations(self) -> typing.Dict:
         return  {
@@ -194,25 +198,43 @@ class Visualization(gui.dashboard.Manager):
             "forecast": agg.weighted_avg(wcol="nsamples",cols=["forecast"])
         }
 
-    def aggregateTable(self,tfilt:Table,chart_type:str,by_values:typing.List[str],metric_values:typing.List[str]) -> Table:
-
-        calcs = set(["nsamples"] + metric_values if chart_type=="ovp" else metric_values)
-        byv = [b for b in by_values if b!="NONE"]
-        tagg = tfilt.agg_by([self.aggregations()[m] for m in calcs],by=byv).sort([b for b in byv if b in self.sortable])
-
-        if "feature_value" in by_values:
-            tagg = tagg.sort("feature_value")
-
-        return tagg
+    def derived(self) -> typing.Dict:
+        return {}
 
     def canFilter(self,data:Table) -> typing.List[str]:
-        return [c for c in data.column_names if not c in ["nsamples","realized","forecast"]]
+        return [c for c in data.column_names if not c in self.aggregations().keys()]
 
     def canSort(self,data:Table) -> typing.List[str]:
         return [c for c in data.column_names if not c in ["horizon"]]
 
     def mustConstrain(self) -> typing.List[str]:
         return ["horizon","clock","unit","feature_name"]
+
+    def featureBuckets(self) -> typing.List[str]:
+        return ["feature_value"]
+
+# Visualize in GUI: OPRA trades
+class OpraGui(gui.dashboard.Manager):
+
+    def aggregations(self) -> typing.Dict:
+        return  {
+            x: agg.sum_(x) for x in ["num_samples","num_contracts","net_contracts","net_contracts_delta"]
+        }
+
+    def derived(self) -> typing.Dict[str,typing.Tuple[str,typing.List[str]]]:
+        return {
+            "delta_imbalance" : ("net_contracts_delta/num_contracts",["net_contracts_delta","num_contracts"]),
+            "net_imbalance" : ("net_contracts/num_contracts",["net_contracts","num_contracts"])
+        }
+
+    def canFilter(self,data:Table) -> typing.List[str]:
+        return [c for c in data.column_names if not c in self.aggregations().keys()]
+
+    def canSort(self,data:Table) -> typing.List[str]:
+        return data.column_names
+
+    def mustConstrain(self) -> typing.List[str]:
+        return ["feature_name"]
 
     def featureBuckets(self) -> typing.List[str]:
         return ["feature_value"]

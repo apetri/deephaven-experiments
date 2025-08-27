@@ -102,6 +102,15 @@ class Manager(object):
             "count": agg.count_("count"),
         }
 
+    def derived(self) -> typing.Dict:
+        """
+        Derived aggregations
+        """
+
+        return {
+            "one" : ("count/count",["count"])
+        }
+
     def canFilter(self,data:Table) -> typing.List[str]:
         """
         Returns a list of columns that can be filtered on
@@ -122,14 +131,6 @@ class Manager(object):
 
     def featureBuckets(self) -> typing.List[str]:
         return []
-
-    def aggregateTable(self,tfilt:Table,chart_type:str,by_values:typing.List[str],metric_values:typing.List[str]) -> Table:
-
-        # Run aggregations
-        byv = [b for b in by_values if b!="NONE"]
-        tagg = tfilt.agg_by([self.aggregations()[m] for m in set(metric_values)],by=byv).sort([b for b in byv if b in self.sortable])
-
-        return tagg
 
     ##############################################
     ##############################################
@@ -237,7 +238,7 @@ class Manager(object):
 
     def metricChoices(self,chart_type:str) -> typing.Dict:
 
-        metrics = list(self.aggregations().keys())
+        metrics = list(self.aggregations().keys()) + list(self.derived().keys())
 
         match chart_type:
             case "bars":
@@ -285,6 +286,35 @@ class Manager(object):
             "by_buttons" : by_buttons,
             "metric_button" : metric_buttons,
         }
+
+    def aggregateTable(self,tfilt:Table,chart_type:str,by_values:typing.List[str],metric_values:typing.List[str]) -> Table:
+
+        ## Find out which metrics we need to calculate
+        aggr = self.aggregations()
+        derv = self.derived()
+
+        calclist = dict()
+        dervlist = []
+
+        ## Aggregations + derived metrics
+        for m in metric_values:
+            if m in aggr:
+                calclist[m] = aggr[m]
+            else:
+                for dep in derv[m][1]:
+                    calclist[dep] = aggr[dep]
+                dervlist.append(f"{m} = {derv[m][0]}")
+
+        # Run aggregations
+        byv = [b for b in by_values if b!="NONE"]
+        tagg = tfilt.agg_by(aggs=list(calclist.values()),by=byv).sort([b for b in byv if b in self.sortable])
+
+        # Calculate derived stats if any
+        if(len(dervlist)>0):
+            tagg = tagg.update(dervlist)
+
+        # Done
+        return tagg
 
     ## Charting
     def _toggleChartType(self,chart_type:str):
