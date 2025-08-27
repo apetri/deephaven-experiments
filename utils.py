@@ -1,7 +1,8 @@
 import typing
 
-from deephaven import empty_table,agg,merge
+from deephaven import agg,merge,new_table
 from deephaven.table import Table
+from deephaven.column import InputColumn
 import deephaven.numpy as dhnp
 
 def hmerge(t1:Table,t2:Table) -> Table:
@@ -56,3 +57,22 @@ def unpivot(t:Table,keycols:typing.List[str],keyname:str,valuename:str):
         chnks.append(t.select(keycols + [f"{keyname} = `{cn}`",f"{valuename} = {cn}"]))
 
     return merge(chnks)
+
+def binColumn(t:Table,col:InputColumn,out:InputColumn|None=None,signed:bool=True) -> Table:
+
+    namein = col.j_column.name()
+    nameout = out.j_column.name() if out is not None else namein + "_bin"
+
+    bkts = new_table([col,out] if out is not None else [col])
+    if out is None:
+        bkts = bkts.update(f"{nameout} = {namein}")
+
+    types = [ x["DataType"] for x in bkts.meta_table.iter_dict() ]
+
+    t = t.update(f"__aux = abs({namein})" if signed else f"__aux = {namein}")
+    t = t.aj(table=bkts,on=f"__aux>={namein}",joins=f"{nameout}")
+
+    if signed:
+        t = t.update(f"{nameout} = {nameout} * ({types[1]})Math.signum({namein})")
+
+    return t.drop_columns(["__aux"])

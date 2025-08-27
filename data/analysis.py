@@ -1,34 +1,14 @@
 import typing
 
 from deephaven import agg,merge,new_table
-from deephaven.column import string_col,double_col
+from deephaven.column import int_col,string_col
 from deephaven.table import Table
 from deephaven.updateby import rolling_formula_tick
 
 from . import dbclient
+
+import utils
 import gui
-
-#########################################
-#########################################
-
-def binColumn(t:Table|None,orig:str,binned:str,binning:typing.Tuple,signed:bool=True) -> Table:
-
-    bkts = new_table([
-        double_col(f"{orig}",binning[0]),
-        double_col(f"{binned}",binning[1])
-        ]
-    )
-
-    if t is None:
-        return bkts
-
-    t = t.update(f"__aux = abs({orig})" if signed else f"__aux = {orig}")
-    t = t.aj(table=bkts,on=f"__aux>={orig}",joins=f"{binned}")
-
-    if signed:
-        t = t.update(f"{binned} = {binned} * Math.signum({orig})")
-
-    return t.drop_columns(["__aux"])
 
 #########################################
 #########################################
@@ -175,7 +155,8 @@ class TCBBO(object):
         optrd = self.asof(oth,features).where("!isNull(sideimpl)")
 
         # Bucketing
-        optrd = binColumn(optrd.update("days2expiry = (double)days2expiry"),orig="days2expiry",binned="days2expiry_bkt",binning=([0,1,10,21,64,100],[0,1,10,21,64,100]))
+        optrd = utils.binColumn(optrd,col=int_col("days2expiry",[0,1,10,21,100]),signed=False)
+        optrd = utils.binColumn(optrd,col=int_col("days2expiry",[0,1]),out=string_col("expiry_type",["zdte","other"]),signed=False)
 
         # Collect aggregations
         trdagg = []
