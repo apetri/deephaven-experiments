@@ -1,9 +1,7 @@
 import typing
 
 from deephaven import ui,agg
-
 from deephaven.table import Table
-from deephaven.pandas import to_pandas
 
 from . import traces
 
@@ -30,7 +28,7 @@ class Manager(object):
     def __init__(self,data:Table):
 
         self._data = data
-        self._ctypes = dict(to_pandas(data.meta_table)[["Name","DataType"]].values)
+        self._ctypes = { r["Name"]:r["DataType"] for r in data.meta_table.iter_dict() }
         self._filterable = self.canFilter(data)
         self._sortable = self.canSort(data)
 
@@ -132,6 +130,13 @@ class Manager(object):
     def featureBuckets(self) -> typing.List[str]:
         return []
 
+    def featureTraces(self,metrics:typing.List[str]) -> typing.Dict:
+
+        return {
+            "Aggregation metric (prediction)": metrics,
+            "Aggregation metric (observation)": metrics[1:] + [metrics[0]]
+        }
+
     ##############################################
     ##############################################
 
@@ -150,7 +155,7 @@ class Manager(object):
             chrts.append("timeseries")
     
         if len(self.featureBuckets())>0:
-            chrts.append("ovp")
+            chrts.append("featurelines")
     
         return chrts
 
@@ -227,7 +232,7 @@ class Manager(object):
                     "Time": self.timeCols(),
                     "Trace by": [c for c in filterable if not c in self.timeCols() ]
                 }
-            case "ovp":
+            case "featurelines":
                 return {
                     "Primary by": filterable,
                     "Secondary by": ["NONE"] + filterable,
@@ -254,11 +259,8 @@ class Manager(object):
                 return {
                     "Aggregation metric": metrics
                 }
-            case "ovp":
-                return {
-                    "Aggregation metric (prediction)": metrics,
-                    "Aggregation metric (observation)": metrics[1:] + [metrics[0]]
-                }
+            case "featurelines":
+                return self.featureTraces(metrics)
             case _:
                 raise ValueError("Chart type not implemented")
 
@@ -307,7 +309,9 @@ class Manager(object):
 
         # Run aggregations
         byv = [b for b in by_values if b!="NONE"]
-        tagg = tfilt.agg_by(aggs=list(calclist.values()),by=byv).sort([b for b in byv if b in self.sortable])
+        srt = set([x for x in byv if x in self.featureBuckets()] + [x for x in byv if x in self.sortable])
+
+        tagg = tfilt.agg_by(aggs=list(calclist.values()),by=byv).sort(list(srt))
 
         # Calculate derived stats if any
         if(len(dervlist)>0):
@@ -342,8 +346,8 @@ class Manager(object):
                 return traces.lines(tagg,by=byv[0],mX=metrics[0],mY=metrics[1])
             case "timeseries":
                 return traces.timeseries(tagg,tc=byv[0],by=byv[1],metric=metrics[0])
-            case "ovp":
-                return traces.ovp(tagg,bys=byv[:-1],feat=byv[-1],metrics=metrics)
+            case "featurelines":
+                return traces.featurelines(tagg,bys=byv[:-1],feat=byv[-1],metrics=metrics)
             case _:
                 raise ValueError(f"Chart type:{chart_type} not implemented")
 
@@ -389,7 +393,7 @@ class Manager(object):
                 ui.stack(
                     ui.panel(ui.text(" AND ".join(filt["filter_clauses"])),filt["filtered_table"],title="Filtered table"),
                     ui.panel(aggtbl,title="Aggregated table"),
-                    ui.panel(chrt,title=f"Charted aggregation: {self._chart_type}"),height=60
+                    ui.panel(chrt,title=f"Chart: {self._chart_type}"),height=60
                 ),
                 height=60
             )

@@ -75,6 +75,12 @@ class Example(dashboard.Manager):
     def featureBuckets(self) -> typing.List[str]:
         return ["n1"]
 
+    def featureTraces(self, metrics: typing.List[str]) -> typing.Dict:
+        return {
+            "Aggregation metric (prediction)": ["valuePred"],
+            "Aggregation metric (observation)": ["valueObs"]
+        }
+
 ###################################################
 ###################################################
 

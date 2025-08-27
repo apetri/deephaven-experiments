@@ -34,9 +34,9 @@ def bars(t:Table,bys:typing.List[str],metric:str) -> go.Figure:
 def lines(t:Table,by:str,mX:str,mY:str) -> dx.DeephavenFigure:
     return dx.line(t,x=mX,y=mY,by=by,markers=True)
 
-# OVP has to be implemented through px
+# featurelines has to be implemented through px
 # dx does not support the necessary control granularity over traces
-def ovp(t:Table,bys:typing.List[str],feat:str,metrics:typing.List[str]) -> go.Figure:
+def featurelines(t:Table,bys:typing.List[str],feat:str,metrics:typing.List[str]) -> go.Figure:
 
     # Tag line chunks
     xc = "X".join(bys)
