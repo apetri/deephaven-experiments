@@ -56,16 +56,18 @@ class MBP1(object):
         return t.move_columns_up(["date","hour"])
 
     # Calculate returns
-    def returns(self,samples:Table,lag:typing.Dict) -> Table:
+    def returns(self,samples:Table,lag:typing.Dict,colname="mid_fwd") -> Table:
 
-        samples = samples.update("ts_fwd = ts_event + '{0}'".format(lag["durationstr"]))
-        samples = samples.aj(table=self.universe,on=["ts_fwd>=ts_event"],joins=["mid_fwd = mid"])
-        samples = samples.update([f"mid_change_{lag['horizon']} = mid_fwd - mid",f"mid_ret_{lag['horizon']} = 1e4 * mid_change_{lag['horizon']} / mid"])
-        samples = samples.drop_columns(["ts_fwd","mid_fwd"])
+        samples = samples.update("ts_fwd = ts_event + '{durationstr}'".format(**lag))
+        samples = samples.aj(table=self.universe,on=["ts_fwd>=ts_event"],joins=[colname.format(**lag) + " = mid"])
+        samples = samples.drop_columns(["ts_fwd"])
 
         return samples
 
     def analyzeEvents(self,evs:Table,feature_names:typing.List[str]=[],timelags:Table=TIMELAGS,ticklags = [1,5,10,50,100]) -> Table:
+
+        aggr_price = [agg.count_("nsamples"),agg.avg(f"forecast"),agg.avg(f"realized = mid_change")]
+        aggr_bps =  [agg.count_("nsamples"),agg.avg(f"forecast = forecast_bps"),agg.avg(f"realized = mid_ret")]
 
         tagg = []
 
@@ -73,9 +75,7 @@ class MBP1(object):
         for it in timelags.iter_dict():
 
             evret = self.returns(evs,it)
-
-            aggr_price = [agg.count_("nsamples"),agg.avg(f"forecast"),agg.avg(f"realized = mid_change_{it['horizon']}")]
-            aggr_bps =  [agg.count_("nsamples"),agg.avg(f"forecast = forecast_bps"),agg.avg(f"realized = mid_ret_{it['horizon']}")]
+            evret = evret.update(["mid_change = mid_fwd - mid","mid_ret = 1e4*mid_change / mid"])
 
             for feat in feature_names:
 
@@ -85,9 +85,6 @@ class MBP1(object):
                 tagg.append(evret.agg_by(aggr_bps,by=["feature_value"]).update([f"feature_name = `{feat}`",f"horizon = `{it['horizon']}`","unit = `bps`","clock = `physical`"]))
 
         # Tick based lags
-        aggr_price = [agg.count_("nsamples"),agg.avg(f"forecast"),agg.avg(f"realized = mid_change")]
-        aggr_bps =  [agg.count_("nsamples"),agg.avg(f"forecast = forecast_bps"),agg.avg(f"realized = mid_ret")]
-
         for tk in ticklags:
 
             univret = self.universe.update_by(rolling_formula_tick(formula="mid_fwd = last(mid)",fwd_ticks=tk)).update(["mid_change = mid_fwd - mid","mid_ret = 1e4 * mid_change / mid"])
@@ -109,7 +106,8 @@ class TCBBO(object):
         agg.count_("num_samples"),
         agg.sum_("num_contracts = size"),
         agg.formula("net_contracts_delta = sum(size*sidedelta)"),
-        agg.formula("net_contracts = sum(size*sideimpl)")
+        agg.formula("net_contracts = sum(size*sideimpl)"),
+        agg.weighted_avg(wcol="size",cols="moneyness")
     ]
 
     def __init__(self,dbclient:dbclient.DBHClient,path:str,date:str="20250801") -> None:
@@ -149,10 +147,11 @@ class TCBBO(object):
 
     ##################################################
 
-    def analyzeEvents(self,oth:Table,features:typing.List[str],bys:typing.List[str]) -> Table:
+    def analyzeTag(self,oth:Table,features:typing.List[str],bys:typing.List[str]) -> Table:
 
         # Ignore unsigned trades
-        optrd = self.asof(oth,features).where("!isNull(sideimpl)")
+        optrd = self.asof(oth,["mid"] + features).where("!isNull(sideimpl)")
+        optrd = optrd.update("moneyness = log(mid/strike_price) * (typ=`C` ? 1 : -1)")
 
         # Bucketing
         optrd = utils.binColumn(optrd,col=int_col("days2expiry",[0,1,10,21,100]),signed=False)
@@ -204,9 +203,12 @@ class Mbp1Gui(gui.dashboard.Manager):
 class OpraGui(gui.dashboard.Manager):
 
     def aggregations(self) -> typing.Dict:
-        return  {
+        calcs = {
             x: agg.sum_(x) for x in ["num_samples","num_contracts","net_contracts","net_contracts_delta"]
         }
+
+        calcs["moneyness"] = agg.weighted_avg(wcol="num_contracts",cols="moneyness")
+        return calcs
 
     def derived(self) -> typing.Dict[str,typing.Tuple[str,typing.List[str]]]:
         return {
@@ -228,5 +230,5 @@ class OpraGui(gui.dashboard.Manager):
 
     def featureTraces(self, metrics: typing.List[str]) -> typing.Dict:
         return {
-            "Trace": ["delta_imbalance"]
+            "Trace": ["delta_imbalance","moneyness"]
         }
