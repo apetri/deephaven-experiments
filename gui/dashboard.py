@@ -15,6 +15,8 @@ class Manager(object):
                 return f"{c}='{v}'"
             case "java.time.LocalTime":
                 return f"{c}='{v}'"
+            case "java.time.Duration":
+                return f"{c}='{v}'"
             case _:
                 return f"{c}={v}"
 
@@ -26,6 +28,14 @@ class Manager(object):
          l1 = l0.copy()
          l1[n] = v
          return l1
+
+    def selectDistinct(self,data:Table,col:str,typ:str) -> Table:
+
+        match typ:
+            case "java.time.Duration":
+                return data.select_distinct(col).sort(col).update(f"{col} = {col}.toString()")
+            case _:
+                return data.select_distinct(col).sort(col)
 
     def __init__(self,data:Table):
 
@@ -196,7 +206,7 @@ class Manager(object):
         # Filter buttons
         filter_buttons_single = [
 
-            ui.combo_box(self._data.select_distinct(c).sort(c),
+            ui.combo_box(self.selectDistinct(self.data,c,self.ctypes[c]),
                          key=c,
                          label=c,
                          selected_key=self._filter_values.get(c),
@@ -206,7 +216,7 @@ class Manager(object):
         ]
 
         filter_buttons_single += [
-            ui.picker(self._data.select_distinct(c).sort(c),
+            ui.picker(self.selectDistinct(self.data,c,self.ctypes[c]),
                       key=c,
                       label=c,
                       selected_key=self._filter_values.get(c),
@@ -217,7 +227,7 @@ class Manager(object):
 
         filter_buttons_multiple = [
 
-            ui.checkbox_group(*[x[c] for x in self._data.select_distinct(c).sort(c).iter_dict()],
+            ui.checkbox_group(*[x[c] for x in self.selectDistinct(self.data,c,self.ctypes[c]).iter_dict()],
                               label=c,
                               value=self._filter_values.get(c),
                               on_change=lambda v,x=c: self._set_filter_values({**self._filter_values,x:v}),

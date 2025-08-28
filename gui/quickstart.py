@@ -6,6 +6,7 @@ from deephaven.updateby import cum_sum
 from deephaven.appmode import ApplicationState, get_app_state
 
 from gui import dashboard
+from globalscope import *
 
 class Example(dashboard.Manager):
 

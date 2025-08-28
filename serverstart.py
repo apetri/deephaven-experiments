@@ -10,7 +10,7 @@ from deephaven_server.server import Server
 s = Server(port=10000, jvm_args=["-Xmx8g","-DAuthHandlers=io.deephaven.auth.AnonymousAuthenticationHandler","-Dprocess.info.system-info.enabled=false"])
 s.start()
 
-from deephaven import new_table,empty_table,agg
+from deephaven import new_table,empty_table,agg,ui
 from deephaven.table import Table
 from deephaven.column import int_col,float_col,string_col
 
