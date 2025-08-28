@@ -2,6 +2,8 @@ import importlib
 import sys,argparse
 from deephaven_server.server import Server
 
+from globalscope import *
+
 JVM_ARGS = [
     "-DAuthHandlers=io.deephaven.auth.AnonymousAuthenticationHandler",
     "-Dprocess.info.system-info.enabled=false"

@@ -12,16 +12,16 @@ class Example(dashboard.Manager):
     @classmethod
     def random(cls,t:Table):
         t = t.update([
-            "cat1 = new String[]{`a`,`b`,`c`}[randomInt(0,3)]",
-            "cat2 = new String[]{`DD`,`EE`,`FF`,`GG`}[randomInt(0,4)]",
-            "cat3 = new String[]{`fff`,`ggg`,`hhh`,`iii`,`lll`}[randomInt(0,4)]",
-            "n1 = new int[]{1,2,3,4}[randomInt(0,4)]",
-            "n2 = new int[]{10,20,30}[randomInt(0,3)]",
-            "value1 = random()",
-            "value2 = n1 + random()",
-            "value3 = n2 + 10*n1*n1 + random()",
+            "cat1 = rndString(`a`,`b`,`c`)",
+            "cat2 = rndString(`DD`,`EE`,`FF`,`GG`)",
+            "cat3 = rndString(`fff`,`ggg`,`hhh`,`iii`,`lll`)",
+            "n1 = rndInt(1,2,3,4)",
+            "n2 = rndInt(10,20,30)",
+            "value1 = rndUnif(0,1)",
+            "value2 = n1 + rndUnif(0,1)",
+            "value3 = n2 + 10*n1*n1 + rndUnif(0,1)",
             "valuePred = 4*n1",
-            "valueObs = -2.5 + random()*5 + 4*n1",
+            "valueObs = rndUnif(-2.5,2.5) + 4*n1",
             "date = '2025-01-01' + 'P1D' * (int)(i/10)",
             "idx = 1"
         ]
