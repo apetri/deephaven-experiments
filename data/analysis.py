@@ -219,6 +219,9 @@ class OpraGui(gui.dashboard.Manager):
     def canFilter(self,data:Table) -> typing.List[str]:
         return [c for c in data.column_names if not c in self.aggregations().keys()]
 
+    def multipleSelect(self) -> typing.List[str]:
+        return ["venue","days2expiry_bin"]
+
     def canSort(self,data:Table) -> typing.List[str]:
         return data.column_names
 

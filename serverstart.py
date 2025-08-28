@@ -12,6 +12,7 @@ s.start()
 
 from deephaven import new_table,empty_table,agg
 from deephaven.table import Table
+from deephaven.column import int_col,float_col,string_col
 
 import deephaven.numpy as dhnp
 import deephaven.pandas as dhpd

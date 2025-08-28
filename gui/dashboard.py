@@ -7,8 +7,7 @@ from . import traces
 
 class Manager(object):
 
-    @staticmethod
-    def formatClause(typ:str,c:str,v) -> str:
+    def formatLiteral(self,typ:str,c:str,v) -> str:
         match typ:
             case "java.lang.String":
                 return f"{c}=`{v}`"
@@ -18,6 +17,9 @@ class Manager(object):
                 return f"{c}='{v}'"
             case _:
                 return f"{c}={v}"
+
+    def formatClause(self,typ:str,c:str,vs:typing.List) -> str:
+        return " || ".join([self.formatLiteral(typ,c,v) for v in vs])
 
     @staticmethod
     def amendList(l0:typing.List,n:int,v) -> typing.List:
@@ -29,8 +31,14 @@ class Manager(object):
 
         self._data = data
         self._ctypes = { r["Name"]:r["DataType"] for r in data.meta_table.iter_dict() }
+
         self._filterable = self.canFilter(data)
+        self._constrained = self.mustConstrain()
+        self._free = [f for f in self._filterable if not f in self._constrained]
+
         self._sortable = self.canSort(data)
+        self._multiple_filters = [ f for f in self.multipleSelect() if (f in self._filterable) and (not f in self._constrained) ]
+        self._single_filters = [f for f in self._filterable if not f in self._multiple_filters ]
 
         # State management, assigned later upon dashboard rendering
         self._chart_type = "NONE"
@@ -66,7 +74,23 @@ class Manager(object):
     @property
     def filterable(self) -> typing.List[str]:
         return self._filterable
-    
+
+    @property
+    def constrained(self) -> typing.List[str]:
+        return self._constrained
+
+    @property
+    def free(self) -> typing.List[str]:
+        return self._free
+
+    @property
+    def single_filters(self) -> typing.List[str]:
+        return self._single_filters
+
+    @property
+    def multiple_filters(self) -> typing.List[str]:
+        return self._multiple_filters
+
     @property
     def sortable(self) -> typing.List[str]:
         return self._sortable
@@ -115,6 +139,13 @@ class Manager(object):
         """
         return data.column_names
 
+    def multipleSelect(self) -> typing.List[str]:
+
+        """
+        Returns list of columns that can have a multiple select filter
+        """
+        return []
+
     def canSort(self,data:Table) -> typing.List[str]:
         """
         Returns a list of columns that can be explicitly be sorted on upon aggregation
@@ -162,37 +193,46 @@ class Manager(object):
     ## Filtering
     def filteringControls(self) -> typing.Dict:
 
-        constrain = self.mustConstrain()
-        free = [c for c in self.filterable if not c in constrain ]
-
         # Filter buttons
-        filter_buttons = [
+        filter_buttons_single = [
 
             ui.combo_box(self._data.select_distinct(c).sort(c),
                          key=c,
                          label=c,
                          selected_key=self._filter_values.get(c),
-                         on_change=lambda v,x=c: self._set_filter_values({**self._filter_values,x:v}))
+                         on_change=lambda v,x=c: self._set_filter_values({**self._filter_values,x:[v] if v is not None else []}))
 
-            for c in free
+            for c in self.free if not c in self.multiple_filters
         ]
 
-        filter_buttons += [
+        filter_buttons_single += [
             ui.picker(self._data.select_distinct(c).sort(c),
                       key=c,
                       label=c,
                       selected_key=self._filter_values.get(c),
-                      on_change=lambda v,x=c: self._set_filter_values({**self._filter_values,x:v}))
+                      on_change=lambda v,x=c: self._set_filter_values({**self._filter_values,x:[v]}))
 
-            for c in constrain
+            for c in self.constrained
+        ]
+
+        filter_buttons_multiple = [
+
+            ui.checkbox_group(*[x[c] for x in self._data.select_distinct(c).sort(c).iter_dict()],
+                              label=c,
+                              value=self._filter_values.get(c),
+                              on_change=lambda v,x=c: self._set_filter_values({**self._filter_values,x:v}),
+                              orientation="horizontal")
+
+            for c in self.multiple_filters
         ]
 
         # Clear all filters
-        clear = ui.button("Clear all filters",on_press=lambda b: self._set_filter_values({k:(None if k in free else v) for k,v in self._filter_values.items() }))
+        clear = ui.button("Clear all filters",on_press=lambda b: self._set_filter_values({k:([] if k in self.free else v) for k,v in self._filter_values.items() }))
 
         # Done
         return {
-            "filter_buttons" : filter_buttons,
+            "filter_buttons_single" : filter_buttons_single,
+            "filter_buttons_multiple" : filter_buttons_multiple,
             "clear_button" : clear
         }
 
@@ -202,7 +242,7 @@ class Manager(object):
         # Exclude "must constrain clauses if that clause is in a by"
         excl = [c for c in self.mustConstrain() if c in bys]
 
-        clauses = [self.formatClause(self.ctypes[x],x,filter_values[x]) for x in filter_values if (filter_values[x] is not None) and (not x in excl)]
+        clauses = [self.formatClause(self.ctypes[x],x,filter_values[x]) for x in filter_values if (len(filter_values[x])>0) and (not x in excl)]
         tfilt = self._data.where(clauses)
 
         return {
@@ -358,9 +398,9 @@ class Manager(object):
         self._chart_type,self._set_chart_type = ui.use_state(self.chartTypes()[0])
 
         mustcnstr = self.mustConstrain()
-        dflt:typing.Dict = {x:None for x in self.filterable}
+        dflt:typing.Dict = {x:[] for x in self.filterable}
         if len(mustcnstr)>0:
-            dflt.update(next(self._data.iter_dict(cols=mustcnstr)))
+            dflt.update( {k:[v] for k,v in next(self._data.iter_dict(cols=mustcnstr)).items()} )
 
         self._filter_values,self._set_filter_values = ui.use_state(dflt)
 
@@ -384,7 +424,13 @@ class Manager(object):
         # Arrange
         return ui.column(
             ui.row(
-                ui.column(ui.panel(filtcntrl["clear_button"],ui.flex(*filtcntrl["filter_buttons"],wrap="wrap"),title="Filtering controls")),
+                ui.column(
+                    ui.panel(filtcntrl["clear_button"],
+                             ui.flex(*filtcntrl["filter_buttons_single"],wrap="wrap"),
+                             ui.column(*filtcntrl["filter_buttons_multiple"]),
+                             title="Filtering controls"
+                             )
+                        ),
                 ui.column(
                     ui.panel(ui.flex(chrtcntrl["chart_button"]),ui.flex(*aggcntrl["by_buttons"],wrap="wrap"),ui.flex(aggcntrl["metric_button"],wrap="wrap"),title="Aggregation controls")
                 )

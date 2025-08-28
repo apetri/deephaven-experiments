@@ -69,6 +69,9 @@ class Example(dashboard.Manager):
         """
         return [c for c in data.column_names if (not c.startswith("value") and not c=="Timestamp")]
 
+    def multipleSelect(self) -> typing.List[str]:
+        return ["cat2","n2"]
+
     def mustConstrain(self) -> typing.List[str]:
         return ["cat3"]
 
