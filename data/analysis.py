@@ -102,13 +102,10 @@ class MBP1(object):
 # Analysis for TCBBO schema (option trades)
 class TCBBO(object):
 
-    AGGREGATIONS = [
-        agg.count_("num_samples"),
-        agg.sum_("num_contracts = size"),
-        agg.formula("net_contracts_delta = sum(size*sidedelta)"),
-        agg.formula("net_contracts = sum(size*sideimpl)"),
-        agg.weighted_avg(wcol="size",cols="moneyness")
+    TIMELAGS = new_table([
+        string_col("horizon",["-5m","-1m","-10s","-1s","-0.1s","-0.01s","0s","0.01s","0.1s","1s","10s","1m"])
     ]
+    ).update(["durationstr = `PT` + horizon","duration = parseDuration(durationstr)"])
 
     def __init__(self,dbclient:dbclient.DBHClient,path:str,date:str="20250801") -> None:
 
@@ -142,15 +139,21 @@ class TCBBO(object):
 
     ##################################################
 
-    def asof(self,oth:Table,joins:typing.List[str]) -> Table:
-        return self._universe.aj(oth,on="ts_event",joins=["ts_eq = ts_event"] + joins)
+    def analyzeTag(self,ext:Table,features:typing.List[str],bys:typing.List[str]) -> Table:
 
-    ##################################################
-
-    def analyzeTag(self,oth:Table,features:typing.List[str],bys:typing.List[str]) -> Table:
+        calcs = [
+            agg.count_("num_samples"),
+            agg.sum_("num_contracts = size"),
+            agg.formula("net_contracts_delta = sum(size*sidedelta)"),
+            agg.formula("net_contracts = sum(size*sideimpl)"),
+            agg.weighted_avg(wcol="size",cols="moneyness")
+        ]
 
         # Ignore unsigned trades
-        optrd = self.asof(oth,["mid"] + features).where("!isNull(sideimpl)")
+        optrd = self.universe.where("!isNull(sideimpl)")
+
+        # aj other source
+        optrd = optrd.aj(ext,on="ts_event",joins=["ts_oth = ts_event","mid"] + features)
         optrd = optrd.update("moneyness = log(mid/strike_price) * (typ=`C` ? 1 : -1)")
 
         # Bucketing
@@ -160,10 +163,37 @@ class TCBBO(object):
         # Collect aggregations
         trdagg = []
         for fn in features:
-            trdagg.append(optrd.where(f"!isNull({fn})").rename_columns([f"feature_value = {fn}"]).agg_by(self.AGGREGATIONS,by=["feature_value"] + bys).sort(bys + ["feature_value"]).update([f"feature_name = `{fn}`","feature_value_abs = abs(feature_value)"]))
+            trdagg.append(optrd.where(f"!isNull({fn})").rename_columns([f"feature_value = {fn}"]).agg_by(calcs,by=["feature_value"] + bys).sort(bys + ["feature_value"]).update([f"feature_name = `{fn}`","feature_value_abs = abs(feature_value)"]))
 
         # Done
         return merge(trdagg)
+
+    ##################################################
+
+    def analyzeMove(self,ext:MBP1,bys:typing.List[str],lags:Table=TIMELAGS) -> Table:
+
+        # Ignore unsigned trades
+        optrd = self.universe.where("!isNull(sideimpl)")
+
+        # Bucketing
+        optrd = utils.binColumn(optrd,col=int_col("days2expiry",[0,1,10,21,100]),signed=False)
+        optrd = utils.binColumn(optrd,col=int_col("days2expiry",[0,1]),out=string_col("expiry_type",["zdte","other"]),signed=False)
+
+        # aj other source (with lags) + calculate aggregation metrics
+        tagg = []
+        calcs = [
+            agg.count_("num_samples"),
+            agg.sum_("num_contracts = size"),
+            agg.weighted_avg(wcol="size",cols="sided_move")
+        ]
+
+        optrd = optrd.aj(ext.universe,on="ts_event",joins=["mid"])
+        for lg in lags.iter_dict():
+            trdlag = ext.returns(optrd,lg)
+            trdlag = trdlag.update(["mid_change = mid_fwd - mid","sided_move = sidedelta*mid_change"])
+            tagg.append(trdlag.agg_by(calcs,by=bys).update(["horizon = `{horizon}`".format(**lg)]))
+
+        return merge(tagg)
 
 #########################################
 #########################################
@@ -200,7 +230,7 @@ class Mbp1Gui(gui.dashboard.Manager):
         }
 
 # Visualize in GUI: OPRA trades
-class OpraGui(gui.dashboard.Manager):
+class OpraFeatGui(gui.dashboard.Manager):
 
     def aggregations(self) -> typing.Dict:
         calcs = {
@@ -234,4 +264,37 @@ class OpraGui(gui.dashboard.Manager):
     def featureTraces(self, metrics: typing.List[str]) -> typing.Dict:
         return {
             "Trace": ["delta_imbalance","moneyness"]
+        }
+
+class OpraMoveGui(gui.dashboard.Manager):
+
+    def aggregations(self) -> typing.Dict:
+        calcs = {
+            x: agg.sum_(x) for x in ["num_samples","num_contracts"]
+        }
+
+        calcs["sided_move"] = agg.weighted_avg(wcol="num_contracts",cols="sided_move")
+        return calcs
+
+    def derived(self) -> typing.Dict[str,typing.Tuple[str,typing.List[str]]]:
+        return{}
+
+    def canFilter(self,data:Table) -> typing.List[str]:
+        return [c for c in data.column_names if not c in self.aggregations().keys()]
+
+    def multipleSelect(self) -> typing.List[str]:
+        return ["venue","days2expiry_bin"]
+
+    def canSort(self,data:Table) -> typing.List[str]:
+        return [ c for c in data.column_names if not c=="horizon" ]
+
+    def mustConstrain(self) -> typing.List[str]:
+        return ["horizon"]
+
+    def featureBuckets(self) -> typing.List[str]:
+        return ["horizon"]
+
+    def featureTraces(self, metrics: typing.List[str]) -> typing.Dict:
+        return {
+            "Trace": ["sided_move"]
         }

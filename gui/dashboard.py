@@ -349,7 +349,7 @@ class Manager(object):
 
         # Run aggregations
         byv = [b for b in by_values if b!="NONE"]
-        srt = set([x for x in byv if x in self.featureBuckets()] + [x for x in byv if x in self.sortable])
+        srt = set([x for x in self.featureBuckets() + byv if (x in byv) and x in self.sortable])
 
         tagg = tfilt.agg_by(aggs=list(calclist.values()),by=byv).sort(list(srt))
 
