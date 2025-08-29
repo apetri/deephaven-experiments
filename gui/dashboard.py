@@ -1,6 +1,6 @@
 import typing
 
-from deephaven import ui,agg
+from deephaven import ui,agg,updateby
 from deephaven.table import Table
 
 from . import traces
@@ -62,6 +62,9 @@ class Manager(object):
 
         self._metric_values = ["None"]
         self._set_metric_values = lambda v:None
+
+        self._modifiers = {"None":"None"}
+        self._set_modifiers = lambda v:None
     
     @classmethod
     def fetch(cls,callable:typing.Callable,*args,**kwargs):
@@ -337,13 +340,19 @@ class Manager(object):
                 for i,(n,m) in enumerate(metric_choices.items())
             ]
 
+        ## Modifiers
+
+        # Cumulative button
+        cum = ui.checkbox("cumulative",value=str(self._modifiers["cumulative"]),on_change=lambda v:self._set_modifiers({"cumulative":v}))
+
         # Done
         return {
             "by_buttons" : by_buttons,
             "metric_button" : metric_buttons,
+            "cumulative_button" : cum if self._chart_type=="timeseries" else None
         }
 
-    def aggregateTable(self,tfilt:Table,chart_type:str,by_values:typing.List[str],metric_values:typing.List[str]) -> Table:
+    def aggregateTable(self,tfilt:Table,chart_type:str,by_values:typing.List[str],metric_values:typing.List[str],modifiers:typing.Dict) -> Table:
 
         ## Find out which metrics we need to calculate
         aggr = self.aggregations()
@@ -371,14 +380,25 @@ class Manager(object):
         if(len(dervlist)>0):
             tagg = tagg.update(dervlist)
 
+        ## Apply modifiers
+
+        # Cumulative
+        if modifiers["cumulative"]:
+            tagg = tagg.update_by([updateby.cum_sum(m) for m in metric_values],by=byv[1:])
+
         # Done
         return tagg
 
     ## Charting
     def _toggleChartType(self,chart_type:str):
+
         self._set_chart_type(chart_type)
+
         self._set_by_values([v[0] for n,v in self.byChoices(chart_type).items()])
         self._set_metric_values([v[0] for n,v in self.metricChoices(chart_type).items()])
+
+        if not chart_type=="timeseries":
+            self._set_modifiers({"cumulative":False})
 
     def _setMetrics(self,v):
 
@@ -388,10 +408,10 @@ class Manager(object):
 
         self._set_metric_values(v)
 
-    def chartControls(self,chart_type:str) -> typing.Dict:
+    def chartControls(self) -> typing.Dict:
 
         # Graph type button
-        chart_button = ui.picker(*self.chartTypes(),selected_key=chart_type,on_change=lambda v:self._toggleChartType(str(v)),label="Chart type")
+        chart_button = ui.picker(*self.chartTypes(),selected_key=self._chart_type,on_change=lambda v:self._toggleChartType(str(v)),label="Chart type")
 
         return {
             "chart_button": chart_button
@@ -429,19 +449,21 @@ class Manager(object):
         self._by_values,self._set_by_values = ui.use_state([m[0] for n,m in self.byChoices(self._chart_type).items()])
         self._metric_values,self._set_metric_values = ui.use_state([m[0] for n,m in self.metricChoices(self._chart_type).items()])
 
+        self._modifiers,self._set_modifiers = ui.use_state({"cumulative":False})
+
         # Controls
         filtcntrl = self.filteringControls()
-        chrtcntrl = self.chartControls(self._chart_type)
-        aggcntrl = ui.use_memo(lambda:self.aggregationControls(),[self._chart_type,self._by_values,self._metric_values])
+        chrtcntrl = self.chartControls()
+        aggcntrl = self.aggregationControls()
 
         # Filtering
         filt = ui.use_memo(lambda:self.filterTable(self._filter_values,self._by_values),[self._filter_values,self._by_values])
 
         # Aggregations
-        aggtbl = ui.use_memo(lambda:self.aggregateTable(filt["filtered_table"],self._chart_type,self._by_values,self._metric_values),[filt,self._chart_type,self._by_values,self._metric_values])
+        aggtbl = ui.use_memo(lambda:self.aggregateTable(filt["filtered_table"],self._chart_type,self._by_values,self._metric_values,self._modifiers),[filt,self._chart_type,self._by_values,self._metric_values,self._modifiers])
 
         # Charting
-        chrt = ui.use_memo(lambda:self.chartTable(self._chart_type,aggtbl,self._by_values,self._metric_values),[self._chart_type,aggtbl,self._by_values,self._metric_values])
+        chrt = ui.use_memo(lambda:self.chartTable(self._chart_type,aggtbl,self._by_values,self._metric_values),[self._chart_type,aggtbl,self._by_values,self._metric_values,self._modifiers])
 
         # Arrange
         return ui.column(
@@ -454,7 +476,7 @@ class Manager(object):
                              )
                         ),
                 ui.column(
-                    ui.panel(ui.flex(chrtcntrl["chart_button"]),ui.flex(*aggcntrl["by_buttons"],wrap="wrap"),ui.flex(aggcntrl["metric_button"],wrap="wrap"),title="Aggregation controls")
+                    ui.panel(ui.flex(chrtcntrl["chart_button"]),ui.flex(*aggcntrl["by_buttons"],wrap="wrap"),aggcntrl["cumulative_button"],ui.flex(aggcntrl["metric_button"],wrap="wrap"),title="Aggregation controls")
                 )
             ),
             ui.row(
