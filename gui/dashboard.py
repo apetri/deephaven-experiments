@@ -171,12 +171,8 @@ class Manager(object):
     def featureBuckets(self) -> typing.List[str]:
         return []
 
-    def featureTraces(self,metrics:typing.List[str]) -> typing.Dict:
-
-        return {
-            "Aggregation metric (prediction)": metrics,
-            "Aggregation metric (observation)": metrics[1:] + [metrics[0]]
-        }
+    def featureTraces(self,metrics:typing.List[str]) -> typing.List:
+        return []
 
     ##############################################
     ##############################################
@@ -310,7 +306,7 @@ class Manager(object):
                     "Aggregation metric": metrics
                 }
             case "featurelines":
-                return self.featureTraces(metrics)
+                return {"traces" : self.featureTraces(metrics) }
             case _:
                 raise ValueError("Chart type not implemented")
 
@@ -328,10 +324,18 @@ class Manager(object):
         # Aggregation metric buttons
         metric_choices = self.metricChoices(self._chart_type)
 
-        metric_buttons = [
-            ui.picker(*m,selected_key=self._metric_values[i],on_change=lambda v,i=i:self._set_metric_values(self.amendList(self._metric_values,i,v)),label=n)
-            for i,(n,m) in enumerate(metric_choices.items())
-        ]
+        metric_buttons = []
+        if self._chart_type=="featurelines":
+            metric_buttons += [
+                ui.checkbox_group(
+                    *metric_choices["traces"],label="traces",value=self._metric_values,on_change=lambda v:self._setMetrics(v),orientation="horizontal"
+                )
+            ]
+        else:
+            metric_buttons += [
+                ui.picker(*m,selected_key=self._metric_values[i],on_change=lambda v,i=i:self._set_metric_values(self.amendList(self._metric_values,i,v)),label=n)
+                for i,(n,m) in enumerate(metric_choices.items())
+            ]
 
         # Done
         return {
@@ -375,6 +379,14 @@ class Manager(object):
         self._set_chart_type(chart_type)
         self._set_by_values([v[0] for n,v in self.byChoices(chart_type).items()])
         self._set_metric_values([v[0] for n,v in self.metricChoices(chart_type).items()])
+
+    def _setMetrics(self,v):
+
+        # Prevent from selecting zero traces
+        if(len(v)==0):
+            return
+
+        self._set_metric_values(v)
 
     def chartControls(self,chart_type:str) -> typing.Dict:
 

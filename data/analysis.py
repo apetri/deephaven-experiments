@@ -223,11 +223,8 @@ class Mbp1Gui(gui.dashboard.Manager):
     def featureBuckets(self) -> typing.List[str]:
         return ["feature_value"]
 
-    def featureTraces(self, metrics: typing.List[str]) -> typing.Dict:
-        return {
-            "Aggregation metric (prediction)": ["forecast"],
-            "Aggregation metric (observation)": ["realized"]
-        }
+    def featureTraces(self, metrics: typing.List[str]) -> typing.List[str]:
+        return ["realized","forecast"]
 
 # Visualize in GUI: OPRA trades
 class OpraFeatGui(gui.dashboard.Manager):
@@ -261,10 +258,8 @@ class OpraFeatGui(gui.dashboard.Manager):
     def featureBuckets(self) -> typing.List[str]:
         return ["feature_value"]
 
-    def featureTraces(self, metrics: typing.List[str]) -> typing.Dict:
-        return {
-            "Trace": ["delta_imbalance","moneyness"]
-        }
+    def featureTraces(self, metrics: typing.List[str]) -> typing.List[str]:
+        return ["delta_imbalance","moneyness"]
 
 class OpraMoveGui(gui.dashboard.Manager):
 
@@ -294,7 +289,5 @@ class OpraMoveGui(gui.dashboard.Manager):
     def featureBuckets(self) -> typing.List[str]:
         return ["horizon"]
 
-    def featureTraces(self, metrics: typing.List[str]) -> typing.Dict:
-        return {
-            "Trace": ["sided_move"]
-        }
+    def featureTraces(self, metrics: typing.List[str]) -> typing.List[str]:
+        return ["sided_move"]
