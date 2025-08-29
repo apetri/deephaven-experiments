@@ -13,14 +13,26 @@ import gui
 #########################################
 #########################################
 
+def makeLagTable(lags:typing.List[str],symmetric:bool=False) -> Table:
+
+    if symmetric:
+        lags = lags + ["0s"] + ["-"+l for l in lags]
+
+    tbl = new_table([string_col("horizon",lags)])
+    tbl = tbl.update([
+        "durationstr = `PT` + horizon",
+        "duration = parseDuration(durationstr)"
+    ])
+
+    return tbl.sort("duration")
+
+#########################################
+#########################################
+
 # Analysis for MBP-1 schema (equities)
 class MBP1(object):
 
-    TIMELAGS = new_table([
-        string_col("horizon",["10ms","100ms","1s","10s","1min"]),
-        string_col("durationstr",["PT"+x for x in ["0.01s","0.1s","1s","10s","1m"]])
-    ]
-    ).update("duration = parseDuration(durationstr)")
+    TIMELAGS = makeLagTable(["0.01s","0.1s","1s","10s","1m"],symmetric=False)
 
     def __init__(self,dbclient:dbclient.DBHClient,path:str) -> None:
 
@@ -46,14 +58,6 @@ class MBP1(object):
         return trd
 
     ################################################################################################
-
-    # Binning buckets
-    @staticmethod
-    def buckets(t:Table):
-        t = t.update("date = ts_event.atZone('EST').toLocalDate()")
-        t = t.update("hour = lowerBin(ts_event,HOUR).atZone('EST').toLocalTime()")
-
-        return t.move_columns_up(["date","hour"])
 
     # Calculate returns
     def returns(self,samples:Table,lag:typing.Dict,colname="mid_fwd") -> Table:
@@ -102,10 +106,7 @@ class MBP1(object):
 # Analysis for TCBBO schema (option trades)
 class TCBBO(object):
 
-    TIMELAGS = new_table([
-        string_col("horizon",["-5m","-1m","-10s","-1s","-0.1s","-0.01s","0s","0.01s","0.1s","1s","10s","1m"])
-    ]
-    ).update(["durationstr = `PT` + horizon","duration = parseDuration(durationstr)"])
+    TIMELAGS = makeLagTable(["0.01s","0.1s","1s","10s","1m"],symmetric=True)
 
     def __init__(self,dbclient:dbclient.DBHClient,path:str,date:str="20250801") -> None:
 
@@ -139,7 +140,7 @@ class TCBBO(object):
 
     ##################################################
 
-    def analyzeTag(self,ext:Table,features:typing.List[str],bys:typing.List[str]) -> Table:
+    def analyzeTag(self,mbp1:MBP1,mbp1Hook:typing.Callable[[MBP1],Table],features:typing.List[str],bys:typing.List[str]) -> Table:
 
         calcs = [
             agg.count_("num_samples"),
@@ -153,10 +154,16 @@ class TCBBO(object):
         optrd = self.universe.where("!isNull(sideimpl)")
 
         # aj other source
-        optrd = optrd.aj(ext,on="ts_event",joins=["ts_oth = ts_event","mid"] + features)
+        ext = mbp1Hook(mbp1)
+        optrd = optrd.aj(ext,on="ts_event",joins=["ts_mbp1 = ts_event","mid"] + features)
         optrd = optrd.update("moneyness = log(mid/strike_price) * (typ=`C` ? 1 : -1)")
 
         # Bucketing
+        optrd = optrd.update([
+            "hour = lowerBin(ts_event,HOUR).atZone('ET').toLocalTime()",
+            "minute = lowerBin(ts_event,MINUTE).atZone('ET').toLocalTime()"
+            ])
+
         optrd = utils.binColumn(optrd,col=int_col("days2expiry",[0,1,10,21,100]),signed=False)
         optrd = utils.binColumn(optrd,col=int_col("days2expiry",[0,1]),out=string_col("expiry_type",["zdte","other"]),signed=False)
 
@@ -170,7 +177,7 @@ class TCBBO(object):
 
     ##################################################
 
-    def analyzeMove(self,ext:MBP1,bys:typing.List[str],lags:Table=TIMELAGS) -> Table:
+    def analyzeMove(self,mbp1:MBP1,mbp1Hook:typing.Callable[[MBP1],Table],bys:typing.List[str],lags:Table=TIMELAGS) -> Table:
 
         # Ignore unsigned trades
         optrd = self.universe.where("!isNull(sideimpl)")
@@ -178,6 +185,14 @@ class TCBBO(object):
         # Bucketing
         optrd = utils.binColumn(optrd,col=int_col("days2expiry",[0,1,10,21,100]),signed=False)
         optrd = utils.binColumn(optrd,col=int_col("days2expiry",[0,1]),out=string_col("expiry_type",["zdte","other"]),signed=False)
+
+        optrd = optrd.update([
+            "hour = lowerBin(ts_event,HOUR).atZone('ET').toLocalTime()",
+            "minute = lowerBin(ts_event,MINUTE).atZone('ET').toLocalTime()"
+            ])
+
+        # Exclude first 5 min
+        optrd = optrd.where("minute > '09:35'")
 
         # aj other source (with lags) + calculate aggregation metrics
         tagg = []
@@ -187,9 +202,16 @@ class TCBBO(object):
             agg.weighted_avg(wcol="size",cols="sided_move")
         ]
 
-        optrd = optrd.aj(ext.universe,on="ts_event",joins=["mid"])
+        ext = mbp1Hook(mbp1)
+        joins = [c for c in bys if c in ext.column_names]
+
+        if len(joins)>0:
+            optrd = optrd.aj(ext,on="ts_event",joins=joins)
+
+        # aj returns + aggregate
+        optrd = optrd.aj(mbp1.universe,on="ts_event",joins=["mid"])
         for lg in lags.iter_dict():
-            trdlag = ext.returns(optrd,lg)
+            trdlag = mbp1.returns(optrd,lg)
             trdlag = trdlag.update(["mid_change = mid_fwd - mid","sided_move = sidedelta*mid_change"])
             tagg.append(trdlag.agg_by(calcs,by=bys).update(["horizon = `{horizon}`".format(**lg)]))
 
@@ -256,7 +278,7 @@ class OpraFeatGui(gui.dashboard.Manager):
         return ["feature_name"]
 
     def featureBuckets(self) -> typing.List[str]:
-        return ["feature_value"]
+        return ["feature_value","feature_value_abs"]
 
     def featureTraces(self, metrics: typing.List[str]) -> typing.List[str]:
         return ["delta_imbalance","moneyness"]
