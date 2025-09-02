@@ -34,14 +34,17 @@ class MBP1(object):
 
     TIMELAGS = makeLagTable(["0.01s","0.1s","1s","10s","1m"],symmetric=False)
 
-    def __init__(self,dbclient:dbclient.DBHClient,path:str) -> None:
+    @classmethod
+    def fromDB(cls,dbclient:dbclient.DBHClient):
 
-        self._dbclient = dbclient
-
-        data = dbclient.read(path) if path.startswith(dbclient._root) else dbclient.readbatch(path)
+        data = dbclient.readTable("databento_nbbo")
         data = data.update("mid = 0.5*(bid_px_00 + ask_px_00)")
         data = data.sort("ts_event")
 
+        return cls(dbclient,data)
+
+    def __init__(self,dbclient:dbclient.DBHClient,data:Table) -> None:
+        self._dbclient = dbclient
         self._universe = data
 
     @property
@@ -108,12 +111,11 @@ class TCBBO(object):
 
     TIMELAGS = makeLagTable(["0.01s","0.1s","1s","10s","1m"],symmetric=True)
 
-    def __init__(self,dbclient:dbclient.DBHClient,path:str,date:str="20250801") -> None:
+    @classmethod
+    def fromDB(cls,dbclient:dbclient.DBHClient):
 
-        self._dbclient = dbclient
-
-        opts = dbclient.options(date)
-        data = dbclient.read(path) if path.startswith(dbclient._root) else dbclient.readbatch(path)
+        opts = dbclient.options()
+        data = dbclient.readTable("opra_trades")
 
         data = data.natural_join(dbclient.feeds,on="publisher_id",joins="venue")
         data = data.natural_join(opts,on="instrument_id",joins=["days2expiry","typ = instrument_class","strike_price"])
@@ -128,6 +130,10 @@ class TCBBO(object):
             "sideimpl = price<=bid_px_00 ? -1 : (price>=ask_px_00 ? 1 : NULL_INT)",
             "sidedelta = sideimpl * (typ = `C` ? 1 : -1)"])
 
+        return cls(dbclient,data)
+
+    def __init__(self,dbclient:dbclient.DBHClient,data:Table) -> None:
+        self._dbclient = dbclient
         self._universe = data
 
     @property
@@ -151,12 +157,13 @@ class TCBBO(object):
         ]
 
         # Ignore unsigned trades
-        optrd = self.universe.where("!isNull(sideimpl)")
+        optrd = self.universe.snapshot().where("!isNull(sideimpl)")
 
         # aj other source
         ext = mbp1Hook(mbp1)
         optrd = optrd.aj(ext,on="ts_event",joins=["ts_mbp1 = ts_event","mid"] + features)
         optrd = optrd.update("moneyness = log(mid/strike_price) * (typ=`C` ? 1 : -1)")
+
 
         # Bucketing
         optrd = optrd.update([

@@ -1,9 +1,12 @@
+import os
 import typing
 
 import pandas as pd
 import numpy as np
 
 import deephaven.pandas as dhpd
+import deephaven.parquet as dhpq
+
 from deephaven.table import Table
 from deephaven import new_table
 from deephaven.column import long_col,double_col
@@ -39,8 +42,13 @@ class DBHClient(Client):
 
     def __init__(self, root="data/") -> None:
         super().__init__(root)
+        self._dbroot = os.path.join(self._root,"db")
         self.get_feeds()
         self._feeds.publisher_id = self._feeds.publisher_id.astype(np.int32)
+
+    @property
+    def dbroot(self) -> str:
+        return self._dbroot
 
     @property
     def feeds(self) -> Table:
@@ -52,12 +60,15 @@ class DBHClient(Client):
     def lsbatch(self) -> Table:
         return dhpd.to_table(super().lsbatch())
 
-    def read(self,path:str) -> Table:
+    def readDBN(self,path:str) -> Table:
         return dhpd.to_table(dbn2df(path))
 
     def readbatch(self,jobid:str) -> Table:
         rec = next(self.lsbatch().where(f"jobid = `{jobid}`").iter_dict())
-        return self.read(rec["filename"])
+        return self.readDBN(rec["filename"])
+
+    def readTable(self,tablename:str) -> Table:
+        return dhpq.read(os.path.join(self._dbroot,tablename))
 
     #############################################################
 
@@ -92,19 +103,18 @@ class DBHClient(Client):
     ################################################################################
     ################################################################################
 
-    def options(self,date:str="20250801") -> Table:
+    def options(self) -> Table:
 
-        opts = self.read(self.path(date,"OPRA.PILLAR","definition"))
+        opts = self.readTable("options")
 
         opts = opts.update([
-            "date = ts_event.atZone('UTC').toLocalDate()",
             "expiry = expiration.atZone('UTC').toLocalDate()",
             "days2expiry = numberBusinessDates(ts_event,expiration) - 1"
-            ])
+        ])
 
         opts = opts.sort("expiry")
 
-        return opts.move_columns_up(["underlying","date","expiry","days2expiry"])
+        return opts.move_columns_up(["underlying","expiry","days2expiry"])
 
     @staticmethod
     def byDays2exp(opts:Table) -> Table:
