@@ -60,8 +60,14 @@ class Manager(object):
         self._by_values = ["None"]
         self._set_by_values = lambda v:None
 
+        self._plot_by = ["None"]
+        self._set_plot_by = lambda v:None
+
         self._metric_values = ["None"]
         self._set_metric_values = lambda v:None
+
+        self._plot_traces = ["None"]
+        self._set_plot_traces = lambda v:None
 
         self._modifiers = {"None":"None"}
         self._set_modifiers = lambda v:None
@@ -320,7 +326,7 @@ class Manager(object):
         by_choices = self.byChoices(self._chart_type)
 
         by_buttons = [
-            ui.picker(*f,selected_key=self._by_values[i],on_change=lambda v,i=i:self._set_by_values(self.amendList(self._by_values,i,v)),label=k)
+            ui.picker(*f,selected_key=self._by_values[i],on_change=lambda v,i=i:self._setBy(self.amendList(self._by_values,i,v)),label=k)
             for i,(k,f) in enumerate(by_choices.items())
         ]
 
@@ -336,7 +342,7 @@ class Manager(object):
             ]
         else:
             metric_buttons += [
-                ui.picker(*m,selected_key=self._metric_values[i],on_change=lambda v,i=i:self._set_metric_values(self.amendList(self._metric_values,i,v)),label=n)
+                ui.picker(*m,selected_key=self._metric_values[i],on_change=lambda v,i=i:self._setMetrics(self.amendList(self._metric_values,i,v)),label=n)
                 for i,(n,m) in enumerate(metric_choices.items())
             ]
 
@@ -394,11 +400,15 @@ class Manager(object):
 
         self._set_chart_type(chart_type)
 
-        self._set_by_values([v[0] for n,v in self.byChoices(chart_type).items()])
-        self._set_metric_values([v[0] for n,v in self.metricChoices(chart_type).items()])
+        self._setBy([v[0] for n,v in self.byChoices(chart_type).items()])
+        self._setMetrics([v[0] for n,v in self.metricChoices(chart_type).items()])
 
         if not chart_type=="timeseries":
             self._set_modifiers({"cumulative":False})
+
+    def _setBy(self,v):
+        self._set_by_values(v)
+        self._set_plot_by(v)
 
     def _setMetrics(self,v):
 
@@ -407,6 +417,7 @@ class Manager(object):
             return
 
         self._set_metric_values(v)
+        self._set_plot_traces(v)
 
     def chartControls(self) -> typing.Dict:
 
@@ -417,19 +428,19 @@ class Manager(object):
             "chart_button": chart_button
         }
 
-    def chartTable(self,chart_type:str,tagg:Table,bys:typing.List[str],metrics:typing.List[str]):
+    def chartTable(self,chart_type:str,tagg:Table,bys:typing.List[str],trcs:typing.List[str]):
 
         byv = [b for b in bys if b!="NONE"]
 
         match chart_type:
             case "bars":
-                return traces.bars(tagg,bys=byv,metric=metrics[0])
+                return traces.bars(tagg,bys=byv,metric=trcs[0])
             case "lines":
-                return traces.lines(tagg,by=byv[0],mX=metrics[0],mY=metrics[1])
+                return traces.lines(tagg,by=byv[0],mX=trcs[0],mY=trcs[1])
             case "timeseries":
-                return traces.timeseries(tagg,tc=byv[0],by=byv[1],metric=metrics[0])
+                return traces.timeseries(tagg,tc=byv[0],by=byv[1],metric=trcs[0])
             case "featurelines":
-                return traces.featurelines(tagg,bys=byv[:-1],feat=byv[-1],metrics=metrics)
+                return traces.featurelines(tagg,bys=byv[:-1],feat=byv[-1],metrics=trcs)
             case _:
                 raise ValueError(f"Chart type:{chart_type} not implemented")
 
@@ -447,7 +458,10 @@ class Manager(object):
         self._filter_values,self._set_filter_values = ui.use_state(dflt)
 
         self._by_values,self._set_by_values = ui.use_state([m[0] for n,m in self.byChoices(self._chart_type).items()])
+        self._plot_by,self._set_plot_by = ui.use_state(self._by_values)
+
         self._metric_values,self._set_metric_values = ui.use_state([m[0] for n,m in self.metricChoices(self._chart_type).items()])
+        self._plot_traces,self._set_plot_traces = ui.use_state(self._metric_values)
 
         self._modifiers,self._set_modifiers = ui.use_state({"cumulative":False})
 
@@ -463,7 +477,7 @@ class Manager(object):
         aggtbl = ui.use_memo(lambda:self.aggregateTable(filt["filtered_table"],self._chart_type,self._by_values,self._metric_values,self._modifiers),[filt,self._chart_type,self._by_values,self._metric_values,self._modifiers])
 
         # Charting
-        chrt = ui.use_memo(lambda:self.chartTable(self._chart_type,aggtbl,self._by_values,self._metric_values),[self._chart_type,aggtbl,self._by_values,self._metric_values,self._modifiers])
+        chrt = ui.use_memo(lambda:self.chartTable(self._chart_type,aggtbl,self._plot_by,self._plot_traces),[self._chart_type,aggtbl,self._plot_by,self._plot_traces,self._modifiers])
 
         # Arrange
         return ui.column(
