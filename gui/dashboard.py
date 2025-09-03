@@ -153,6 +153,12 @@ class Manager(object):
             "one" : ("count/count",["count"])
         }
 
+    def selectableMetrics(self,metriclist:typing.List[str]) -> typing.List[str]:
+        """
+        Aggregations that are selectable by button click
+        """
+        return metriclist
+
     def canFilter(self,data:Table) -> typing.List[str]:
         """
         Returns a list of columns that can be filtered on
@@ -299,7 +305,7 @@ class Manager(object):
 
     def metricChoices(self,chart_type:str) -> typing.Dict:
 
-        metrics = list(self.aggregations().keys()) + list(self.derived().keys())
+        metrics = self.selectableMetrics(list(self.aggregations().keys()) + list(self.derived().keys()))
 
         match chart_type:
             case "bars":

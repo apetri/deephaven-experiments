@@ -52,7 +52,10 @@ class Example(dashboard.Manager):
             "average2": agg.avg("average2 = value2"),
             "average3": agg.avg("average3 = value3"),
             "valueObs": agg.avg("valueObs"),
-            "valuePred": agg.avg("valuePred")
+            "valuePred": agg.avg("valuePred"),
+            "sXY": agg.formula("sXY = sum(valuePred*valueObs)"),
+            "sXX": agg.formula("sXX = sum(valuePred*valuePred)"),
+            "sYY": agg.formula("sYY = sum(valueObs*valueObs)"),
         }
 
     def derived(self) -> typing.Dict:
@@ -61,8 +64,13 @@ class Example(dashboard.Manager):
         """
 
         return {
-            "ratio12" : ("average1/average2",["average1","average2"])
+            "ratio12" : ("average1/average2",["average1","average2"]),
+            "beta"    : ("sXY/sXX",["sXY","sXX"]),
+            "r2"      : ("1 - (sXX + sYY - 2*sXY) / sYY",["sXX","sYY","sXY"])
         }
+
+    def selectableMetrics(self, metriclist: typing.List[str]) -> typing.List[str]:
+        return [m for m in metriclist if not m in ["sXY","sXX","sYY"]]
 
     def canFilter(self,data:Table) -> typing.List[str]:
         """

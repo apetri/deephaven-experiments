@@ -73,8 +73,19 @@ class MBP1(object):
 
     def analyzeEvents(self,evs:Table,feature_names:typing.List[str]=[],timelags:Table=TIMELAGS,ticklags = [1,5,10,50,100]) -> Table:
 
-        aggr_price = [agg.count_("nsamples"),agg.avg(f"forecast"),agg.avg(f"realized = mid_change")]
-        aggr_bps =  [agg.count_("nsamples"),agg.avg(f"forecast = forecast_bps"),agg.avg(f"realized = mid_ret")]
+        aggr_price = [agg.count_("nsamples"),
+                      agg.avg("forecast"),
+                      agg.avg("realized = mid_change"),
+                      agg.formula("sXX = sum(forecast*forecast)"),
+                      agg.formula("sXY = sum(forecast*mid_change)"),
+                      agg.formula("sYY = sum(mid_change*mid_change)")]
+
+        aggr_bps =  [agg.count_("nsamples"),
+                     agg.avg(f"forecast = forecast_bps"),
+                     agg.avg(f"realized = mid_ret"),
+                     agg.formula("sXX = sum(forecast_bps*forecast_bps)"),
+                     agg.formula("sXY = sum(forecast_bps*mid_ret)"),
+                     agg.formula("sYY = sum(mid_ret*mid_ret)")]
 
         tagg = []
 
@@ -154,6 +165,8 @@ class TCBBO(object):
             agg.formula("net_contracts_delta = sum(size*sidedelta)"),
             agg.formula("net_contracts = sum(size*sideimpl)"),
             agg.weighted_avg(wcol="size",cols="moneyness")
+        ] + [
+            agg.sum_(f"{x}") for x in ["sXX","sYY","sXY"]
         ]
 
         # Ignore unsigned trades
@@ -234,11 +247,20 @@ class Mbp1Gui(gui.dashboard.Manager):
         return  {
             "nsamples": agg.sum_("nsamples"),
             "realized": agg.weighted_avg(wcol="nsamples",cols=["realized"]),
-            "forecast": agg.weighted_avg(wcol="nsamples",cols=["forecast"])
+            "forecast": agg.weighted_avg(wcol="nsamples",cols=["forecast"]),
+            "sXX":      agg.sum_("sXX"),
+            "sXY":      agg.sum_("sXY"),
+            "sYY":      agg.sum_("sYY")
         }
 
     def derived(self) -> typing.Dict:
-        return {}
+        return {
+            "r2" : ("1 - (sXX + sYY - 2*sXY) / sYY",["sXX","sXY","sYY"]),
+            "beta" : ("sXY/sXX",["sXY","sXX"])
+        }
+
+    def selectableMetrics(self, metriclist: typing.List[str]) -> typing.List[str]:
+        return [m for m in metriclist if not m in ["sXX","sYY","sXY"]]
 
     def canFilter(self,data:Table) -> typing.List[str]:
         return [c for c in data.column_names if not c in self.aggregations().keys()]
