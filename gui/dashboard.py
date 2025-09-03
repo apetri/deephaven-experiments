@@ -3,6 +3,7 @@ import typing
 from deephaven import ui,agg,updateby
 from deephaven.table import Table
 
+import utils
 from . import traces
 
 class Manager(object):
@@ -69,7 +70,7 @@ class Manager(object):
         self._plot_traces = ["None"]
         self._set_plot_traces = lambda v:None
 
-        self._modifiers = {"None":"None"}
+        self._modifiers = {"None":False}
         self._set_modifiers = lambda v:None
     
     @classmethod
@@ -326,7 +327,7 @@ class Manager(object):
         by_choices = self.byChoices(self._chart_type)
 
         by_buttons = [
-            ui.picker(*f,selected_key=self._by_values[i],on_change=lambda v,i=i:self._setBy(self.amendList(self._by_values,i,v)),label=k)
+            ui.picker(*f,selected_key=self._by_values[i],on_change=lambda v,i=i:self._set_by_values(self.amendList(self._by_values,i,v)),label=k)
             for i,(k,f) in enumerate(by_choices.items())
         ]
 
@@ -349,13 +350,17 @@ class Manager(object):
         ## Modifiers
 
         # Cumulative button
-        cum = ui.checkbox("cumulative",value=str(self._modifiers["cumulative"]),on_change=lambda v:self._set_modifiers({"cumulative":v}))
+        cum = ui.checkbox("cumulative",is_selected=self._modifiers["cumulative"],on_change=lambda v:self._set_modifiers({**self._modifiers,"cumulative":v}))
+
+        # Pivot button
+        pvt = ui.checkbox("pivot",is_selected=self._modifiers["pivot"],on_change=lambda v:self._set_modifiers({**self._modifiers,"pivot":v}))
 
         # Done
         return {
             "by_buttons" : by_buttons,
             "metric_button" : metric_buttons,
-            "cumulative_button" : cum if self._chart_type=="timeseries" else None
+            "cumulative_button" : cum if self._chart_type=="timeseries" else None,
+            "pivot_button" : pvt if ((self._chart_type=="featurelines") and (len(self._metric_values)==1) and (self._by_values[1]!="NONE")) else None
         }
 
     def aggregateTable(self,tfilt:Table,chart_type:str,by_values:typing.List[str],metric_values:typing.List[str],modifiers:typing.Dict) -> Table:
@@ -392,6 +397,16 @@ class Manager(object):
         if modifiers["cumulative"]:
             tagg = tagg.update_by([updateby.cum_sum(m) for m in metric_values],by=byv[1:])
 
+        # Pivot
+        if modifiers["pivot"]:
+            pltby = [byv[0],byv[2]]
+            tagg = utils.pivot(tagg,pltby,byv[1],metric_values[0])
+            self._set_plot_by(pltby)
+            self._set_plot_traces([c for c in tagg.column_names if not c in pltby])
+        else:
+            self._set_plot_by(byv)
+            self._set_plot_traces(metric_values)
+
         # Done
         return tagg
 
@@ -400,15 +415,10 @@ class Manager(object):
 
         self._set_chart_type(chart_type)
 
-        self._setBy([v[0] for n,v in self.byChoices(chart_type).items()])
+        self._set_by_values([v[0] for n,v in self.byChoices(chart_type).items()])
         self._setMetrics([v[0] for n,v in self.metricChoices(chart_type).items()])
 
-        if not chart_type=="timeseries":
-            self._set_modifiers({"cumulative":False})
-
-    def _setBy(self,v):
-        self._set_by_values(v)
-        self._set_plot_by(v)
+        self._set_modifiers({"cumulative":False,"pivot":False})
 
     def _setMetrics(self,v):
 
@@ -416,8 +426,13 @@ class Manager(object):
         if(len(v)==0):
             return
 
+        # Pivot can select one trace only
+        if self._modifiers["pivot"]:
+            v = [v[-1]]
+
         self._set_metric_values(v)
-        self._set_plot_traces(v)
+
+    ######################################################################
 
     def chartControls(self) -> typing.Dict:
 
@@ -430,17 +445,15 @@ class Manager(object):
 
     def chartTable(self,chart_type:str,tagg:Table,bys:typing.List[str],trcs:typing.List[str]):
 
-        byv = [b for b in bys if b!="NONE"]
-
         match chart_type:
             case "bars":
-                return traces.bars(tagg,bys=byv,metric=trcs[0])
+                return traces.bars(tagg,bys=bys,metric=trcs[0])
             case "lines":
-                return traces.lines(tagg,by=byv[0],mX=trcs[0],mY=trcs[1])
+                return traces.lines(tagg,by=bys[0],mX=trcs[0],mY=trcs[1])
             case "timeseries":
-                return traces.timeseries(tagg,tc=byv[0],by=byv[1],metric=trcs[0])
+                return traces.timeseries(tagg,tc=bys[0],by=bys[1],metric=trcs[0])
             case "featurelines":
-                return traces.featurelines(tagg,bys=byv[:-1],feat=byv[-1],metrics=trcs)
+                return traces.featurelines(tagg,bys=bys[:-1],feat=bys[-1],metrics=trcs)
             case _:
                 raise ValueError(f"Chart type:{chart_type} not implemented")
 
@@ -458,12 +471,12 @@ class Manager(object):
         self._filter_values,self._set_filter_values = ui.use_state(dflt)
 
         self._by_values,self._set_by_values = ui.use_state([m[0] for n,m in self.byChoices(self._chart_type).items()])
-        self._plot_by,self._set_plot_by = ui.use_state(self._by_values)
+        self._plot_by,self._set_plot_by = ui.use_state([v for v in self._by_values if not v=="NONE"])
 
         self._metric_values,self._set_metric_values = ui.use_state([m[0] for n,m in self.metricChoices(self._chart_type).items()])
         self._plot_traces,self._set_plot_traces = ui.use_state(self._metric_values)
 
-        self._modifiers,self._set_modifiers = ui.use_state({"cumulative":False})
+        self._modifiers,self._set_modifiers = ui.use_state({"cumulative":False,"pivot":False})
 
         # Controls
         filtcntrl = self.filteringControls()
@@ -474,10 +487,10 @@ class Manager(object):
         filt = ui.use_memo(lambda:self.filterTable(self._filter_values,self._by_values),[self._filter_values,self._by_values])
 
         # Aggregations
-        aggtbl = ui.use_memo(lambda:self.aggregateTable(filt["filtered_table"],self._chart_type,self._by_values,self._metric_values,self._modifiers),[filt,self._chart_type,self._by_values,self._metric_values,self._modifiers])
+        tagg = ui.use_memo(lambda:self.aggregateTable(filt["filtered_table"],self._chart_type,self._by_values,self._metric_values,self._modifiers),[filt,self._chart_type,self._by_values,self._metric_values,self._modifiers])
 
         # Charting
-        chrt = ui.use_memo(lambda:self.chartTable(self._chart_type,aggtbl,self._plot_by,self._plot_traces),[self._chart_type,aggtbl,self._plot_by,self._plot_traces,self._modifiers])
+        chrt = ui.use_memo(lambda:self.chartTable(self._chart_type,tagg,self._plot_by,self._plot_traces),[self._chart_type,tagg,self._plot_by,self._plot_traces])
 
         # Arrange
         return ui.column(
@@ -490,13 +503,18 @@ class Manager(object):
                              )
                         ),
                 ui.column(
-                    ui.panel(ui.flex(chrtcntrl["chart_button"]),ui.flex(*aggcntrl["by_buttons"],wrap="wrap"),aggcntrl["cumulative_button"],ui.flex(aggcntrl["metric_button"],wrap="wrap"),title="Aggregation controls")
+                    ui.panel(ui.flex(chrtcntrl["chart_button"]),
+                             ui.flex(*aggcntrl["by_buttons"],wrap="wrap"),
+                             aggcntrl["cumulative_button"],
+                             aggcntrl["pivot_button"],
+                             ui.flex(aggcntrl["metric_button"],wrap="wrap"),
+                             title="Aggregation controls")
                 )
             ),
             ui.row(
                 ui.stack(
                     ui.panel(ui.text(" AND ".join(filt["filter_clauses"])),filt["filtered_table"],title="Filtered table"),
-                    ui.panel(aggtbl,title="Aggregated table"),
+                    ui.panel(tagg,title="Aggregated table"),
                     ui.panel(chrt,title=f"Chart: {self._chart_type}"),height=60
                 ),
                 height=60
